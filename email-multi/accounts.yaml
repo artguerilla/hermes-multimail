@@ -1,0 +1,20 @@
+# Email accounts for email-multi plugin
+# Passwords resolved from environment variables (never store plaintext here!)
+
+accounts:
+  - account_id: gmail
+    email: your-email@gmail.com
+    display_name: Gmail
+    password_env: EMAIL_GMAIL_PASSWORD
+    imap_host: imap.gmail.com
+    imap_port: 993
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    allowed_users: []
+    allow_all: false
+    skip_attachments: false
+    folders:
+      inbox: INBOX
+      sent: "[Gmail]/Sent Mail"
+      drafts: "[Gmail]/Drafts"
+      trash: "[Gmail]/Trash"
