@@ -1,7 +1,7 @@
 """Multi-account email configuration.
 
 Reads accounts from EMAIL_MULTI_ACCOUNTS env var (JSON) or
-from a config file at ~/.hermes/plugins/email-multi/accounts.yaml.
+from a config file at ~/.hermes/plugins/email_multi/accounts.yaml.
 
 Each account:
   account_id: gmail
@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 
-ACCOUNTS_YAML = Path.home() / ".hermes" / "plugins" / "email-multi" / "accounts.yaml"
+ACCOUNTS_YAML = Path.home() / ".hermes" / "plugins" / "email_multi" / "accounts.yaml"
 ACCOUNTS_ENV = "EMAIL_MULTI_ACCOUNTS"
 
 

@@ -6,18 +6,27 @@ Thin wrapper around config/service/parsing/attachments modules.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import attachments, config, service
 
-ATTACHMENT_CACHE_DIR = Path.home() / ".cache" / "hermes" / "email-multi"
+ATTACHMENT_CACHE_DIR = Path.home() / ".cache" / "hermes" / "email_multi"
 ATTACHMENT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+class _DateTimeEncoder(json.JSONEncoder):
+    """Serialize datetime/date values as ISO 8601 strings."""
+
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        return super().default(obj)
+
+
 def _json(data: Any) -> str:
-    return json.dumps(data, indent=2, ensure_ascii=False)
+    return json.dumps(data, cls=_DateTimeEncoder, indent=2, ensure_ascii=False)
 
 
 def _ok(**kwargs) -> str:
