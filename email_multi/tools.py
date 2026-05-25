@@ -56,20 +56,37 @@ def _imap_date(date_str: str) -> str:
     return datetime.strptime(date_str, "%Y-%m-%d").strftime("%d-%b-%Y")
 
 
-def _build_imap_criteria(params: dict) -> str:
+def _quote_imap_search_value(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _can_use_portable_text_search(value: str) -> bool:
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError:
+        return False
+    return bool(value)
+
+
+def _build_imap_criteria(params: dict, include_keyword: bool = True) -> str:
     parts: List[str] = []
 
     if params.get("unseen_only"):
         parts.append("UNSEEN")
     if params.get("subject"):
-        parts.append(f'SUBJECT "{params["subject"]}"')
+        parts.append(f'SUBJECT {_quote_imap_search_value(params["subject"])}')
     if params.get("from"):
-        parts.append(f'FROM "{params["from"]}"')
+        parts.append(f'FROM {_quote_imap_search_value(params["from"])}')
     if params.get("date_since"):
         parts.append(f'SINCE {_imap_date(params["date_since"])}')
     if params.get("date_until"):
         until = datetime.strptime(params["date_until"], "%Y-%m-%d") + timedelta(days=1)
         parts.append(f'BEFORE {until.strftime("%d-%b-%Y")}')
+    keyword = (params.get("keyword") or "").strip()
+    if include_keyword and _can_use_portable_text_search(keyword):
+        # TEXT is the portable IMAP SEARCH key that covers headers and body. The
+        # decoded client-side filter below remains the final behavior check.
+        parts.append(f"TEXT {_quote_imap_search_value(keyword)}")
     if params.get("has_attachment"):
         # broad server-side prefilter; exact attachment truth comes from fetched message
         parts.append('OR HEADER Content-Type "multipart/mixed" HEADER Content-Disposition "attachment"')
@@ -146,8 +163,15 @@ def email_multi_list_messages(params: dict) -> str:
         account_id = params["account_id"]
         folder = params.get("folder")
         criteria = _build_imap_criteria(params)
+        fallback_criteria = _build_imap_criteria(params, include_keyword=False) if params.get("keyword") else None
         limit = int(params.get("limit", 50))
-        messages = service.search_messages(account_id=account_id, folder=folder, criteria=criteria, limit=limit)
+        messages = service.search_messages(
+            account_id=account_id,
+            folder=folder,
+            criteria=criteria,
+            limit=limit,
+            fallback_criteria=fallback_criteria,
+        )
         for item in messages:
             item["account_id"] = account_id
         return _ok(success=True, count=len(messages), messages=messages)
@@ -160,21 +184,23 @@ def email_multi_search_messages(params: dict) -> str:
     limit = int(params.get("limit", 50))
     folder = params.get("folder")
     criteria = _build_imap_criteria(params)
+    fallback_criteria = _build_imap_criteria(params, include_keyword=False) if params.get("keyword") else None
     results: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
 
     for account_id in account_ids:
         try:
-            headers = service.search_messages(account_id=account_id, folder=folder, criteria=criteria, limit=limit)
-            for hdr in headers:
-                full = service.get_message(
-                    account_id=account_id,
-                    message_uid=hdr["uid"],
-                    folder=folder,
-                    include_body=True,
-                    include_attachments=True,
-                    save_dir=None,
-                )
+            messages = service.search_full_messages(
+                account_id=account_id,
+                folder=folder,
+                criteria=criteria,
+                limit=limit,
+                fallback_criteria=fallback_criteria,
+                include_body=True,
+                include_attachments=True,
+                save_dir=None,
+            )
+            for full in messages:
                 full["account_id"] = account_id
                 if len(full.get("body_text", "")) > 500:
                     full["body_text"] = full["body_text"][:500] + "..."

@@ -24,7 +24,7 @@ Search emails with filters:
 - `subject`: search subject line
 - `from`: filter by sender
 - `date_since`/`date_until`: date range (YYYY-MM-DD)
-- `keyword`: search body text
+- `keyword`: search decoded subject, sender, and text body; ASCII keywords are first narrowed server-side with IMAP `TEXT`
 - `has_attachment`: only messages with attachments
 - `account_id`: limit to specific account
 
