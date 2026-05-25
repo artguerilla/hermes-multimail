@@ -7,6 +7,7 @@ multiple accounts identified by account_id.
 import email as email_lib
 import imaplib
 import logging
+import re
 import smtplib
 import ssl
 import uuid
@@ -14,7 +15,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate, parseaddr
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .config import get_account
 from .parsing import (
@@ -30,6 +31,8 @@ from .attachments import extract_attachments
 logger = logging.getLogger(__name__)
 
 MAX_MESSAGE_LENGTH = 50_000
+HEADER_FETCH_BATCH_SIZE = 100
+FULL_FETCH_BATCH_SIZE = 25
 
 
 def _get_imap(acc: dict) -> imaplib.IMAP4_SSL:
@@ -58,6 +61,171 @@ def _send_imap_id(imap: imaplib.IMAP4) -> None:
         )
     except Exception:
         pass
+
+
+Uid = Union[bytes, str]
+
+
+def _uid_text(uid: Uid) -> str:
+    return uid.decode() if isinstance(uid, bytes) else str(uid)
+
+
+def _uid_set(uids: List[Uid]) -> str:
+    return ",".join(_uid_text(uid) for uid in uids)
+
+
+def _chunks(items: List[Uid], size: int) -> List[List[Uid]]:
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _parse_fetch_uid(meta: bytes) -> Optional[str]:
+    match = re.search(rb"\bUID\s+(\d+)\b", meta)
+    return match.group(1).decode() if match else None
+
+
+def _parse_fetch_flags(meta: bytes) -> List[str]:
+    match = re.search(rb"\bFLAGS\s+\(([^)]*)\)", meta)
+    if not match:
+        return []
+    return [flag for flag in match.group(1).decode(errors="replace").split() if flag]
+
+
+def _parse_fetch_size(meta: bytes) -> int:
+    match = re.search(rb"\bRFC822\.SIZE\s+(\d+)\b", meta)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return 0
+
+
+def _search_uids(
+    imap: imaplib.IMAP4,
+    criteria: str,
+    fallback_criteria: Optional[str] = None,
+) -> List[bytes]:
+    """Search UIDs, retrying without optional narrowing if the server rejects it."""
+    status, data = imap.uid("search", None, criteria)
+    if status != "OK" and fallback_criteria and fallback_criteria != criteria:
+        logger.info("[email-multi] IMAP search rejected %r; retrying %r", criteria, fallback_criteria)
+        status, data = imap.uid("search", None, fallback_criteria)
+    if status != "OK" or not data or not data[0]:
+        return []
+    return data[0].split()
+
+
+def _fetch_uid_data(imap: imaplib.IMAP4, uids: List[Uid], fetch_spec: str) -> List[Any]:
+    status, msg_data = imap.uid("fetch", _uid_set(uids), fetch_spec)
+    if status == "OK" and msg_data:
+        return msg_data
+    if len(uids) <= 1:
+        return []
+
+    logger.info("[email-multi] Batched UID FETCH rejected; retrying %d UIDs individually", len(uids))
+    rows = []
+    for uid in uids:
+        status, msg_data = imap.uid("fetch", _uid_text(uid), fetch_spec)
+        if status == "OK" and msg_data:
+            rows.extend(msg_data)
+    return rows
+
+
+def _fetch_headers(
+    imap: imaplib.IMAP4,
+    uids: List[Uid],
+) -> Dict[str, Dict[str, Any]]:
+    headers_by_uid: Dict[str, Dict[str, Any]] = {}
+    for batch in _chunks(uids, HEADER_FETCH_BATCH_SIZE):
+        msg_data = _fetch_uid_data(imap, batch, "(UID RFC822.HEADER FLAGS RFC822.SIZE)")
+        if not msg_data:
+            continue
+
+        for part in msg_data:
+            if not isinstance(part, tuple):
+                continue
+            meta = part[0] if isinstance(part[0], bytes) else b""
+            header_bytes = part[1]
+            uid = _parse_fetch_uid(meta)
+            if not uid or not header_bytes:
+                continue
+
+            msg = email_lib.message_from_bytes(header_bytes)
+            hdrs = extract_message_headers(msg)
+            hdrs["uid"] = uid
+            hdrs["flags"] = _parse_fetch_flags(meta)
+            hdrs["size"] = _parse_fetch_size(meta)
+            headers_by_uid[uid] = hdrs
+    return headers_by_uid
+
+
+def _message_from_raw(
+    raw: bytes,
+    uid: str,
+    meta: bytes = b"",
+    include_body: bool = True,
+    include_attachments: bool = True,
+    save_dir: Optional[str] = None,
+    acc: Optional[dict] = None,
+) -> Dict[str, Any]:
+    msg = email_lib.message_from_bytes(raw)
+    result = {
+        "uid": uid,
+        **extract_message_headers(msg),
+    }
+
+    if meta:
+        result["flags"] = _parse_fetch_flags(meta)
+        result["size"] = _parse_fetch_size(meta)
+
+    if include_body:
+        result["body_text"] = extract_text_body(msg)
+        result["body_html"] = extract_html_body(msg)
+        if len(result["body_text"]) > MAX_MESSAGE_LENGTH:
+            result["body_text"] = result["body_text"][:MAX_MESSAGE_LENGTH] + "\n\n... [truncated]"
+
+    if include_attachments:
+        result["attachments"] = extract_attachments(
+            msg,
+            skip_attachments=(acc or {}).get("skip_attachments", False),
+            save_dir=save_dir,
+        )
+
+    return result
+
+
+def _fetch_full_messages(
+    imap: imaplib.IMAP4,
+    uids: List[Uid],
+    acc: dict,
+    include_body: bool = True,
+    include_attachments: bool = True,
+    save_dir: Optional[str] = None,
+) -> Dict[str, Dict[str, Any]]:
+    messages_by_uid: Dict[str, Dict[str, Any]] = {}
+    for batch in _chunks(uids, FULL_FETCH_BATCH_SIZE):
+        msg_data = _fetch_uid_data(imap, batch, "(UID RFC822 FLAGS RFC822.SIZE)")
+        if not msg_data:
+            continue
+
+        for part in msg_data:
+            if not isinstance(part, tuple):
+                continue
+            meta = part[0] if isinstance(part[0], bytes) else b""
+            raw = part[1]
+            uid = _parse_fetch_uid(meta)
+            if not uid or not raw:
+                continue
+            messages_by_uid[uid] = _message_from_raw(
+                raw,
+                uid,
+                meta=meta,
+                include_body=include_body,
+                include_attachments=include_attachments,
+                save_dir=save_dir,
+                acc=acc,
+            )
+    return messages_by_uid
 
 
 def list_folders(account_id: str) -> List[Dict[str, Any]]:
@@ -94,6 +262,7 @@ def search_messages(
     folder: Optional[str] = None,
     criteria: str = "UNSEEN",
     limit: int = 50,
+    fallback_criteria: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Search messages and return lightweight headers."""
     acc = get_account(account_id)
@@ -104,48 +273,14 @@ def search_messages(
     imap = _get_imap(acc)
     try:
         imap.select(folder, readonly=True)
-        status, data = imap.uid("search", None, criteria)
-        if status != "OK" or not data or not data[0]:
-            return []
-
-        uids = data[0].split()
-        uids = uids[-limit:]
-        results = []
-        for uid in reversed(uids):
-            status, msg_data = imap.uid("fetch", uid, "(RFC822.HEADER FLAGS RFC822.SIZE)")
-            if status != "OK" or not msg_data or not msg_data[0]:
-                continue
-
-            header_bytes = None
-            meta = b""
-            for part in msg_data:
-                if isinstance(part, tuple):
-                    meta = part[0] if isinstance(part[0], bytes) else b""
-                    header_bytes = part[1]
-                    break
-            if not header_bytes:
-                continue
-
-            msg = email_lib.message_from_bytes(header_bytes)
-            hdrs = extract_message_headers(msg)
-            hdrs["uid"] = uid.decode() if isinstance(uid, bytes) else uid
-            hdrs["flags"] = []
-            hdrs["size"] = 0
-
-            if b"RFC822.SIZE" in meta:
-                try:
-                    hdrs["size"] = int(meta.split(b"RFC822.SIZE")[1].split()[0].strip(b")"))
-                except Exception:
-                    hdrs["size"] = 0
-            if b"FLAGS" in meta:
-                try:
-                    flag_str = meta.split(b"FLAGS", 1)[1].split(b")", 1)[0].decode(errors="replace")
-                    hdrs["flags"] = [f.strip() for f in flag_str.strip(" ()").split() if f.strip()]
-                except Exception:
-                    hdrs["flags"] = []
-
-            results.append(hdrs)
-        return results
+        uids = _search_uids(imap, criteria, fallback_criteria=fallback_criteria)
+        selected = uids[-limit:]
+        headers_by_uid = _fetch_headers(imap, selected)
+        return [
+            headers_by_uid[_uid_text(uid)]
+            for uid in reversed(selected)
+            if _uid_text(uid) in headers_by_uid
+        ]
     finally:
         try:
             imap.logout()
@@ -170,33 +305,65 @@ def get_message(
     imap = _get_imap(acc)
     try:
         imap.select(folder, readonly=True)
-        status, data = imap.uid("fetch", message_uid, "(RFC822)")
+        status, data = imap.uid("fetch", message_uid, "(UID RFC822 FLAGS RFC822.SIZE)")
         if status != "OK":
             raise RuntimeError(f"Failed to fetch message {message_uid}: {status}")
 
-        raw = data[0][1]
-        msg = email_lib.message_from_bytes(raw)
+        for part in data:
+            if isinstance(part, tuple):
+                meta = part[0] if isinstance(part[0], bytes) else b""
+                uid = _parse_fetch_uid(meta) or message_uid
+                return _message_from_raw(
+                    part[1],
+                    uid,
+                    meta=meta,
+                    include_body=include_body,
+                    include_attachments=include_attachments,
+                    save_dir=save_dir,
+                    acc=acc,
+                )
+        raise RuntimeError(f"Failed to fetch message {message_uid}: empty response")
+    finally:
+        try:
+            imap.logout()
+        except Exception:
+            pass
 
-        result = {
-            "uid": message_uid,
-            **extract_message_headers(msg),
-        }
 
-        if include_body:
-            result["body_text"] = extract_text_body(msg)
-            result["body_html"] = extract_html_body(msg)
-            # Truncate very long bodies
-            if len(result["body_text"]) > MAX_MESSAGE_LENGTH:
-                result["body_text"] = result["body_text"][:MAX_MESSAGE_LENGTH] + "\n\n... [truncated]"
+def search_full_messages(
+    account_id: str,
+    folder: Optional[str] = None,
+    criteria: str = "UNSEEN",
+    limit: int = 50,
+    fallback_criteria: Optional[str] = None,
+    include_body: bool = True,
+    include_attachments: bool = True,
+    save_dir: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Search and fetch full messages using one IMAP session for the account."""
+    acc = get_account(account_id)
+    if not acc:
+        raise ValueError(f"Account not found: {account_id}")
 
-        if include_attachments:
-            result["attachments"] = extract_attachments(
-                msg,
-                skip_attachments=acc.get("skip_attachments", False),
-                save_dir=save_dir,
-            )
-
-        return result
+    folder = folder or acc["folders"]["inbox"]
+    imap = _get_imap(acc)
+    try:
+        imap.select(folder, readonly=True)
+        uids = _search_uids(imap, criteria, fallback_criteria=fallback_criteria)
+        selected = uids[-limit:]
+        messages_by_uid = _fetch_full_messages(
+            imap,
+            selected,
+            acc=acc,
+            include_body=include_body,
+            include_attachments=include_attachments,
+            save_dir=save_dir,
+        )
+        return [
+            messages_by_uid[_uid_text(uid)]
+            for uid in reversed(selected)
+            if _uid_text(uid) in messages_by_uid
+        ]
     finally:
         try:
             imap.logout()
@@ -435,4 +602,3 @@ def check_allowed(account_id: str, sender_addr: str) -> bool:
         # Match Hermes' practical default: if no allow-list is configured, don't block local/operator use.
         return True
     return sender_addr.lower() in allowed
-

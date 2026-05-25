@@ -141,6 +141,17 @@ hermes gateway restart
 }
 ```
 
+`keyword` is sent to IMAP as a portable `TEXT` search for ASCII keywords, so the
+server narrows candidates before full messages are fetched. Results are still
+checked client-side against decoded subject, sender, and text body. If the
+server rejects the `TEXT` search, or if the keyword is non-ASCII, the tool falls
+back to the non-keyword IMAP criteria and applies the decoded keyword filter
+locally.
+
+Search results are fetched over a single IMAP session per account and use
+multi-UID fetch batches for headers and full messages. If a server rejects a
+batched UID fetch, the same session retries those UIDs individually.
+
 ## Security
 
 - **Dedicated mail accounts** — use purpose-built email addresses, not personal inboxes
