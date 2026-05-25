@@ -33,6 +33,8 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGE_LENGTH = 50_000
 HEADER_FETCH_BATCH_SIZE = 100
 FULL_FETCH_BATCH_SIZE = 25
+GMAIL_RAW_CAPABILITY = "X-GM-EXT-1"
+GMAIL_IMAP_HOSTS = {"imap.gmail.com", "imap.googlemail.com"}
 
 
 def _get_imap(acc: dict) -> imaplib.IMAP4_SSL:
@@ -100,12 +102,60 @@ def _parse_fetch_size(meta: bytes) -> int:
         return 0
 
 
+def _capability_tokens(data: Any) -> List[str]:
+    if not data:
+        return []
+
+    tokens: List[str] = []
+    for item in data:
+        if isinstance(item, bytes):
+            text = item.decode("ascii", errors="ignore")
+        else:
+            text = str(item)
+        tokens.extend(part.upper() for part in text.split())
+    return tokens
+
+
+def _has_gmail_capability(imap: imaplib.IMAP4) -> bool:
+    cached = getattr(imap, "capabilities", ())
+    if GMAIL_RAW_CAPABILITY in _capability_tokens(cached):
+        return True
+
+    try:
+        status, data = imap.capability()
+    except Exception:
+        return False
+    if status != "OK":
+        return False
+    return GMAIL_RAW_CAPABILITY in _capability_tokens(data)
+
+
+def _is_gmail_compatible(imap: imaplib.IMAP4, acc: dict) -> bool:
+    host = str(acc.get("imap_host", "")).lower()
+    return host in GMAIL_IMAP_HOSTS or _has_gmail_capability(imap)
+
+
+def _quote_imap_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def _search_uids(
     imap: imaplib.IMAP4,
     criteria: str,
     fallback_criteria: Optional[str] = None,
+    gmail_raw_query: Optional[str] = None,
+    acc: Optional[dict] = None,
 ) -> List[bytes]:
     """Search UIDs, retrying without optional narrowing if the server rejects it."""
+    if gmail_raw_query and acc and _is_gmail_compatible(imap, acc):
+        gmail_criteria = f"X-GM-RAW {_quote_imap_string(gmail_raw_query)}"
+        status, data = imap.uid("search", None, gmail_criteria)
+        if status == "OK":
+            if not data or not data[0]:
+                return []
+            return data[0].split()
+        logger.info("[email-multi] Gmail X-GM-RAW search rejected %r; retrying portable %r", gmail_raw_query, criteria)
+
     status, data = imap.uid("search", None, criteria)
     if status != "OK" and fallback_criteria and fallback_criteria != criteria:
         logger.info("[email-multi] IMAP search rejected %r; retrying %r", criteria, fallback_criteria)
@@ -263,6 +313,7 @@ def search_messages(
     criteria: str = "UNSEEN",
     limit: int = 50,
     fallback_criteria: Optional[str] = None,
+    gmail_raw_query: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Search messages and return lightweight headers."""
     acc = get_account(account_id)
@@ -273,7 +324,13 @@ def search_messages(
     imap = _get_imap(acc)
     try:
         imap.select(folder, readonly=True)
-        uids = _search_uids(imap, criteria, fallback_criteria=fallback_criteria)
+        uids = _search_uids(
+            imap,
+            criteria,
+            fallback_criteria=fallback_criteria,
+            gmail_raw_query=gmail_raw_query,
+            acc=acc,
+        )
         selected = uids[-limit:]
         headers_by_uid = _fetch_headers(imap, selected)
         return [
@@ -336,6 +393,7 @@ def search_full_messages(
     criteria: str = "UNSEEN",
     limit: int = 50,
     fallback_criteria: Optional[str] = None,
+    gmail_raw_query: Optional[str] = None,
     include_body: bool = True,
     include_attachments: bool = True,
     save_dir: Optional[str] = None,
@@ -349,7 +407,13 @@ def search_full_messages(
     imap = _get_imap(acc)
     try:
         imap.select(folder, readonly=True)
-        uids = _search_uids(imap, criteria, fallback_criteria=fallback_criteria)
+        uids = _search_uids(
+            imap,
+            criteria,
+            fallback_criteria=fallback_criteria,
+            gmail_raw_query=gmail_raw_query,
+            acc=acc,
+        )
         selected = uids[-limit:]
         messages_by_uid = _fetch_full_messages(
             imap,

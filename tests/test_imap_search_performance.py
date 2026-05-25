@@ -31,12 +31,19 @@ def _raw_message(uid: int, body: str = "hello keyword") -> bytes:
 
 
 class FakeIMAP:
-    def __init__(self, count=3, search_responses=None, reject_batch_fetch=False):
+    def __init__(
+        self,
+        count=3,
+        search_responses=None,
+        reject_batch_fetch=False,
+        capabilities=(),
+    ):
         self.messages = {str(uid): _raw_message(uid) for uid in range(1, count + 1)}
         self.search_responses = search_responses or [
             ("OK", [b" ".join(str(uid).encode() for uid in range(1, count + 1))])
         ]
         self.reject_batch_fetch = reject_batch_fetch
+        self.capabilities = capabilities
         self.commands = []
         self.selected = []
         self.logged_out = False
@@ -44,6 +51,10 @@ class FakeIMAP:
     def select(self, folder, readonly=False):
         self.selected.append((folder, readonly))
         return "OK", []
+
+    def capability(self):
+        self.commands.append(("capability", ()))
+        return "OK", [b" ".join(cap.encode() for cap in self.capabilities)]
 
     def uid(self, command, *args):
         self.commands.append((command, args))
@@ -90,6 +101,33 @@ class ImapSearchPerformanceTests(unittest.TestCase):
         criteria = tools._build_imap_criteria({"keyword": "café"})
 
         self.assertEqual(criteria, "ALL")
+
+    def test_builds_gmail_raw_query_for_mapped_structured_filters(self):
+        query = tools._build_gmail_raw_query({
+            "keyword": 'paid "invoice"',
+            "subject": "Billing",
+            "from": "ap@example.com",
+            "date_since": "2024-01-01",
+            "date_until": "2024-01-31",
+            "unseen_only": True,
+            "has_attachment": True,
+        })
+
+        self.assertEqual(
+            query,
+            '"paid \\"invoice\\"" subject:"Billing" from:"ap@example.com" '
+            "after:2024/01/01 before:2024/02/01 is:unread has:attachment",
+        )
+
+    def test_gmail_raw_query_is_not_built_for_arbitrary_imap_criteria(self):
+        query = tools._build_gmail_raw_query({"keyword": "paid", "criteria": 'TEXT "paid"'})
+
+        self.assertIsNone(query)
+
+    def test_gmail_raw_query_is_not_built_for_non_ascii_values(self):
+        query = tools._build_gmail_raw_query({"subject": "café"})
+
+        self.assertIsNone(query)
 
     def test_search_messages_batches_header_fetches_and_preserves_metadata(self):
         fake = FakeIMAP(count=150)
@@ -158,6 +196,70 @@ class ImapSearchPerformanceTests(unittest.TestCase):
 
         searches = [args[1] for command, args in fake.commands if command == "search"]
         self.assertEqual(searches, ['TEXT "keyword"', "ALL"])
+        self.assertEqual(result[0]["uid"], "1")
+
+    def test_uses_gmail_raw_search_when_capability_is_advertised(self):
+        fake = FakeIMAP(count=2, capabilities=("IMAP4rev1", "X-GM-EXT-1"))
+        with patch.object(service, "get_account", return_value=self.account), patch.object(
+            service,
+            "_get_imap",
+            return_value=fake,
+        ):
+            result = service.search_messages(
+                "acct",
+                criteria='TEXT "keyword"',
+                fallback_criteria="ALL",
+                gmail_raw_query='"keyword"',
+                limit=2,
+            )
+
+        searches = [args[1] for command, args in fake.commands if command == "search"]
+        self.assertEqual(searches, ['X-GM-RAW "\\"keyword\\""'])
+        self.assertEqual([msg["uid"] for msg in result], ["2", "1"])
+
+    def test_skips_gmail_raw_search_without_gmail_capability(self):
+        fake = FakeIMAP(count=1, capabilities=("IMAP4rev1",))
+        with patch.object(service, "get_account", return_value=self.account), patch.object(
+            service,
+            "_get_imap",
+            return_value=fake,
+        ):
+            result = service.search_messages(
+                "acct",
+                criteria='TEXT "keyword"',
+                fallback_criteria="ALL",
+                gmail_raw_query='"keyword"',
+                limit=1,
+            )
+
+        searches = [args[1] for command, args in fake.commands if command == "search"]
+        self.assertEqual(searches, ['TEXT "keyword"'])
+        self.assertEqual(result[0]["uid"], "1")
+
+    def test_falls_back_to_portable_search_when_gmail_raw_is_rejected(self):
+        fake = FakeIMAP(
+            count=1,
+            search_responses=[
+                ("BAD", [b"unsupported search key"]),
+                ("OK", [b"1"]),
+            ],
+            capabilities=("X-GM-EXT-1",),
+        )
+        with patch.object(service, "get_account", return_value=self.account), patch.object(
+            service,
+            "_get_imap",
+            return_value=fake,
+        ):
+            result = service.search_messages(
+                "acct",
+                criteria='TEXT "keyword"',
+                fallback_criteria="ALL",
+                gmail_raw_query='"keyword"',
+                limit=1,
+            )
+
+        searches = [args[1] for command, args in fake.commands if command == "search"]
+        self.assertEqual(searches, ['X-GM-RAW "\\"keyword\\""', 'TEXT "keyword"'])
         self.assertEqual(result[0]["uid"], "1")
 
 

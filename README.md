@@ -141,12 +141,21 @@ hermes gateway restart
 }
 ```
 
-`keyword` is sent to IMAP as a portable `TEXT` search for ASCII keywords, so the
-server narrows candidates before full messages are fetched. Results are still
-checked client-side against decoded subject, sender, and text body. If the
-server rejects the `TEXT` search, or if the keyword is non-ASCII, the tool falls
-back to the non-keyword IMAP criteria and applies the decoded keyword filter
-locally.
+For Gmail-compatible IMAP servers, structured search filters are first tried as
+a best-effort `X-GM-RAW` query when the server advertises `X-GM-EXT-1` or the
+account uses a known Gmail IMAP host. The mapped fields are `keyword`,
+`subject`, `from`, `date_since`, `date_until`, `unseen_only`, and
+`has_attachment`; arbitrary IMAP `query`/`criteria` values stay on the portable
+path. This acceleration is non-authoritative: if Gmail raw search is not clearly
+supported or the server rejects it, search falls back to the standards-based
+IMAP criteria.
+
+Without Gmail acceleration, `keyword` is sent to IMAP as a portable `TEXT`
+search for ASCII keywords, so the server narrows candidates before full messages
+are fetched. Results are still checked client-side against decoded subject,
+sender, and text body. If the server rejects the `TEXT` search, or if the
+keyword is non-ASCII, the tool falls back to the non-keyword IMAP criteria and
+applies the decoded keyword filter locally.
 
 Search results are fetched over a single IMAP session per account and use
 multi-UID fetch batches for headers and full messages. If a server rejects a

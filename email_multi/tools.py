@@ -68,6 +68,42 @@ def _can_use_portable_text_search(value: str) -> bool:
     return bool(value)
 
 
+def _quote_gmail_raw_value(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _build_gmail_raw_query(params: dict) -> Optional[str]:
+    """Build a Gmail search query for fields that map cleanly to X-GM-RAW."""
+    if params.get("query") or params.get("criteria"):
+        return None
+    for field in ("keyword", "subject", "from"):
+        value = (params.get(field) or "").strip()
+        if value and not _can_use_portable_text_search(value):
+            return None
+
+    parts: List[str] = []
+    keyword = (params.get("keyword") or "").strip()
+    if keyword:
+        parts.append(_quote_gmail_raw_value(keyword))
+    if params.get("subject"):
+        parts.append(f'subject:{_quote_gmail_raw_value(params["subject"])}')
+    if params.get("from"):
+        parts.append(f'from:{_quote_gmail_raw_value(params["from"])}')
+    if params.get("date_since"):
+        since = datetime.strptime(params["date_since"], "%Y-%m-%d")
+        parts.append(f'after:{since.strftime("%Y/%m/%d")}')
+    if params.get("date_until"):
+        until = datetime.strptime(params["date_until"], "%Y-%m-%d") + timedelta(days=1)
+        parts.append(f'before:{until.strftime("%Y/%m/%d")}')
+    if params.get("unseen_only"):
+        parts.append("is:unread")
+    if params.get("has_attachment"):
+        parts.append("has:attachment")
+
+    return " ".join(parts) if parts else None
+
+
 def _build_imap_criteria(params: dict, include_keyword: bool = True) -> str:
     parts: List[str] = []
 
@@ -164,6 +200,7 @@ def email_multi_list_messages(params: dict) -> str:
         folder = params.get("folder")
         criteria = _build_imap_criteria(params)
         fallback_criteria = _build_imap_criteria(params, include_keyword=False) if params.get("keyword") else None
+        gmail_raw_query = _build_gmail_raw_query(params)
         limit = int(params.get("limit", 50))
         messages = service.search_messages(
             account_id=account_id,
@@ -171,6 +208,7 @@ def email_multi_list_messages(params: dict) -> str:
             criteria=criteria,
             limit=limit,
             fallback_criteria=fallback_criteria,
+            gmail_raw_query=gmail_raw_query,
         )
         for item in messages:
             item["account_id"] = account_id
@@ -185,6 +223,7 @@ def email_multi_search_messages(params: dict) -> str:
     folder = params.get("folder")
     criteria = _build_imap_criteria(params)
     fallback_criteria = _build_imap_criteria(params, include_keyword=False) if params.get("keyword") else None
+    gmail_raw_query = _build_gmail_raw_query(params)
     results: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
 
@@ -196,6 +235,7 @@ def email_multi_search_messages(params: dict) -> str:
                 criteria=criteria,
                 limit=limit,
                 fallback_criteria=fallback_criteria,
+                gmail_raw_query=gmail_raw_query,
                 include_body=True,
                 include_attachments=True,
                 save_dir=None,
