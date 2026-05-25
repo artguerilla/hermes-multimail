@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLUGIN_DIR = ROOT / "email-multi"
+PLUGIN_DIR = ROOT / "email_multi"
 spec = importlib.util.spec_from_file_location(
     "email_multi",
     PLUGIN_DIR / "__init__.py",
