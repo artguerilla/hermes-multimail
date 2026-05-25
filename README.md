@@ -22,28 +22,28 @@ cd ~/.hermes/plugins
 git clone https://github.com/artguerilla/hermes-multimail.git
 
 # Move the plugin directory
-mv hermes-multimail/email-multi .
+mv hermes-multimail/email_multi .
 rm -rf hermes-multimail
 
 # Enable in config
 echo "plugins:" >> ~/.hermes/config.yaml
 echo "  enabled:" >> ~/.hermes/config.yaml
-echo "  - email-multi" >> ~/.hermes/config.yaml
+echo "  - email_multi" >> ~/.hermes/config.yaml
 ```
 
 Or drop the plugin directly:
 
 ```bash
-git clone https://github.com/artguerilla/hermes-multimail.git ~/.hermes/plugins/email-multi-temp
-cp -r ~/.hermes/plugins/email-multi-temp/email-multi ~/.hermes/plugins/
-rm -rf ~/.hermes/plugins/email-multi-temp
+git clone https://github.com/artguerilla/hermes-multimail.git ~/.hermes/plugins/email_multi-temp
+cp -r ~/.hermes/plugins/email_multi-temp/email_multi ~/.hermes/plugins/
+rm -rf ~/.hermes/plugins/email_multi-temp
 ```
 
 ## Configuration
 
 ### 1. Accounts
 
-Create `~/.hermes/plugins/email-multi/accounts.yaml`:
+Create `~/.hermes/plugins/email_multi/accounts.yaml`:
 
 ```yaml
 accounts:
@@ -102,7 +102,7 @@ In `~/.hermes/config.yaml`:
 ```yaml
 plugins:
   enabled:
-    - email-multi
+    - email_multi
 ```
 
 Then restart Hermes:
