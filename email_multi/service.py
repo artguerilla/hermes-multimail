@@ -25,6 +25,7 @@ from .parsing import (
     extract_message_headers,
     extract_text_body,
     is_automated_sender,
+    parse_address_list,
 )
 from .attachments import extract_attachments
 
@@ -493,38 +494,40 @@ def reply_email(
 
 
 def extract_all_reply_addresses(orig_msg, exclude: str = "") -> List[str]:
-    """Extract Reply-To or From address, plus Cc for reply-all."""
-    exclude = exclude.lower()
-    addresses = []
+    """Extract reply-all recipients from Reply-To/From plus To/Cc, excluding sender.
 
-    # Reply-To first
+    Precedence: Reply-To > From. To and Cc recipients are appended for reply-all.
+    Addresses are lowercased and deduplicated while preserving stable order.
+
+    Raises ValueError when no valid recipients remain after exclusion.
+    """
+    exclude_lower = exclude.lower()
+    seen: set = set()
+    addresses: List[str] = []
+
+    def _add(raw: str) -> None:
+        for addr in parse_address_list(raw):
+            if addr != exclude_lower and addr not in seen:
+                seen.add(addr)
+                addresses.append(addr)
+
+    # Reply-To takes precedence over From
     reply_to = orig_msg.get("Reply-To", "")
     if reply_to:
-        import re
-        for m in re.finditer(r"<([^>]+)>", reply_to):
-            addr = m.group(1).lower()
-            if addr != exclude:
-                addresses.append(m.group(1))
+        _add(reply_to)
 
-    # If no Reply-To, use From
+    # Fall back to From when Reply-To contributed nothing
     if not addresses:
-        from_addr = orig_msg.get("From", "")
-        import re
-        for m in re.finditer(r"<([^>]+)>", from_addr):
-            addr = m.group(1).lower()
-            if addr != exclude:
-                addresses.append(m.group(1))
+        _add(orig_msg.get("From", ""))
 
-    # Add Cc recipients for reply-all
-    cc = orig_msg.get("Cc", "")
-    if cc:
-        import re
-        for m in re.finditer(r"<([^>]+)>", cc):
-            addr = m.group(1).lower()
-            if addr != exclude and m.group(1) not in addresses:
-                addresses.append(m.group(1))
+    # Include all To and Cc recipients (reply-all)
+    _add(orig_msg.get("To", ""))
+    _add(orig_msg.get("Cc", ""))
 
-    return addresses if addresses else ["unknown@nowhere"]
+    if not addresses:
+        raise ValueError("No valid reply recipients found after excluding sender")
+
+    return addresses
 
 
 def mark_seen(account_id: str, message_uid: str, folder: Optional[str] = None) -> bool:
