@@ -2,7 +2,7 @@
 
 **Multi-account IMAP/SMTP email adapter for [Hermes Agent](https://github.com/NousResearch/hermes-agent).**
 
-Drops into any `~/.hermes/plugins/` directory — zero core modifications, zero external dependencies.
+Drops into any `~/.hermes/plugins/` directory with no core Hermes modifications.
 
 ## Features
 
@@ -12,32 +12,17 @@ Drops into any `~/.hermes/plugins/` directory — zero core modifications, zero 
 - **Thread-safe replies** — `In-Reply-To` and `References` headers out of the box
 - **Access control** — per-account allowlists (`allowed_users` / `allow_all`)
 - **Skip attachments** — optional `skip_attachments` flag for security/bandwidth
-- **Zero dependencies** — Python standard library only (`imaplib`, `smtplib`, `email`)
+- **Small dependency surface** — IMAP/SMTP use the Python standard library; YAML config loading requires `PyYAML`
 
 ## Installation
 
 ```bash
-# Clone into your plugins directory
-cd ~/.hermes/plugins
 git clone https://github.com/artguerilla/hermes-multimail.git
-
-# Move the plugin directory
-mv hermes-multimail/email_multi .
-rm -rf hermes-multimail
-
-# Enable in config
-echo "plugins:" >> ~/.hermes/config.yaml
-echo "  enabled:" >> ~/.hermes/config.yaml
-echo "  - email_multi" >> ~/.hermes/config.yaml
+mkdir -p ~/.hermes/plugins
+cp -R hermes-multimail/email_multi ~/.hermes/plugins/email_multi
 ```
 
-Or drop the plugin directly:
-
-```bash
-git clone https://github.com/artguerilla/hermes-multimail.git ~/.hermes/plugins/email_multi-temp
-cp -r ~/.hermes/plugins/email_multi-temp/email_multi ~/.hermes/plugins/
-rm -rf ~/.hermes/plugins/email_multi-temp
-```
+Then enable `email_multi` in `~/.hermes/config.yaml`.
 
 ## Configuration
 
@@ -125,6 +110,11 @@ hermes gateway restart
 | `email_multi_list_folders` | List IMAP folders for an account |
 | `email_multi_mark_seen` | Mark a message as read |
 | `email_multi_delete_message` | Delete/move to trash |
+
+Hermes registers these 11 tools from `email_multi/schemas.py`. The implementation
+also keeps an internal compatibility handler named `email_multi_search`, but that
+alias is not registered as a separate exported Hermes tool. Use
+`email_multi_search_messages` for search calls.
 
 ### Search Filters
 
