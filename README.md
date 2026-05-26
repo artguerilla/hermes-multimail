@@ -157,6 +157,25 @@ Search results are fetched over a single IMAP session per account and use
 multi-UID fetch batches for headers and full messages. If a server rejects a
 batched UID fetch, the same session retries those UIDs individually.
 
+## Testing
+
+Run all tests:
+
+```bash
+python3 -m unittest
+```
+
+Run specific test files:
+
+```bash
+python3 -m unittest tests/test_smoke.py
+python3 -m unittest tests/test_imap_search_performance.py
+python3 -m unittest tests/test_reply_address_parsing.py
+python3 -m unittest tests/test_config_resolution.py
+python3 -m unittest tests/test_attachments.py
+python3 -m unittest tests/test_delete_semantics.py
+```
+
 ## Security
 
 - **Dedicated mail accounts** — use purpose-built email addresses, not personal inboxes
