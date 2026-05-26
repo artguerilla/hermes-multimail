@@ -1,8 +1,9 @@
 """Smoke tests for email_multi plugin.
 
-Checks two things without network or extra dependencies:
+Checks without network or extra dependencies:
   1. All Python source files in email_multi/ parse cleanly (syntax check).
   2. The _DateTimeEncoder handles datetime/date objects (JSON hardening fix).
+  3. HERMES_HOME-aware path resolution for config and attachment cache.
 
 Run with:
     python tests/test_smoke.py
@@ -10,13 +11,24 @@ or:
     python -m pytest tests/test_smoke.py -v
 """
 import ast
+import importlib.util
 import json
+import os
 import re
 import sys
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 
 PLUGIN_DIR = Path(__file__).resolve().parent.parent / "email_multi"
+
+
+def _load_config():
+    """Load config.py directly (bypasses __init__.py) for isolated runtime tests."""
+    spec = importlib.util.spec_from_file_location("_test_email_multi_config", PLUGIN_DIR / "config.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
 def test_syntax():
@@ -57,24 +69,78 @@ def test_datetime_encoder_nested():
     assert result["messages"][0]["date"] == "2024-06-01T00:00:00"
 
 
-def test_cache_dir_path_uses_underscore():
-    """ATTACHMENT_CACHE_DIR in tools.py must reference email_multi (underscore)."""
-    source = (PLUGIN_DIR / "tools.py").read_text()
-    match = re.search(r"ATTACHMENT_CACHE_DIR\s*=.*", source)
-    assert match, "ATTACHMENT_CACHE_DIR not found in tools.py"
-    line = match.group(0)
-    assert "email_multi" in line, f"ATTACHMENT_CACHE_DIR should use email_multi: {line}"
-    assert "email-multi" not in line, f"ATTACHMENT_CACHE_DIR must not use email-multi: {line}"
-
-
-def test_accounts_yaml_path_uses_underscore():
-    """ACCOUNTS_YAML in config.py must reference email_multi (underscore)."""
+def test_hermes_home_in_config():
+    """config.py must define hermes_home() reading HERMES_HOME env var, using email_multi path."""
     source = (PLUGIN_DIR / "config.py").read_text()
-    match = re.search(r"ACCOUNTS_YAML\s*=.*", source)
-    assert match, "ACCOUNTS_YAML not found in config.py"
-    line = match.group(0)
-    assert "email_multi" in line, f"ACCOUNTS_YAML should use email_multi: {line}"
-    assert "email-multi" not in line, f"ACCOUNTS_YAML must not use email-multi: {line}"
+    assert "def hermes_home" in source, "config.py must define hermes_home() function"
+    assert "HERMES_HOME" in source, "config.py must reference HERMES_HOME env var"
+    assert "email_multi" in source, "config.py must use email_multi (underscore) in path"
+    assert "email-multi" not in source, "config.py must not use email-multi (hyphen)"
+
+
+def test_attachment_cache_uses_hermes_home():
+    """tools.py must route attachment cache through hermes_home(), not ~/.cache."""
+    source = (PLUGIN_DIR / "tools.py").read_text()
+    assert "hermes_home" in source, "tools.py must use hermes_home() for cache path"
+    assert ".cache" not in source, "tools.py must not hardcode ~/.cache"
+    assert "email_multi" in source, "tools.py must use email_multi (underscore) in path"
+    assert "email-multi" not in source, "tools.py must not use email-multi (hyphen)"
+
+
+def test_hermes_home_default():
+    """hermes_home() returns ~/.hermes when HERMES_HOME is not set."""
+    env_backup = os.environ.pop("HERMES_HOME", None)
+    try:
+        cfg = _load_config()
+        assert cfg.hermes_home() == Path.home() / ".hermes", (
+            f"Expected {Path.home() / '.hermes'}, got {cfg.hermes_home()}"
+        )
+    finally:
+        if env_backup is not None:
+            os.environ["HERMES_HOME"] = env_backup
+
+
+def test_hermes_home_custom():
+    """hermes_home() returns the HERMES_HOME value when the env var is set."""
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["HERMES_HOME"] = tmp
+        try:
+            cfg = _load_config()
+            assert cfg.hermes_home() == Path(tmp), (
+                f"Expected {tmp}, got {cfg.hermes_home()}"
+            )
+        finally:
+            os.environ.pop("HERMES_HOME", None)
+
+
+def test_load_accounts_uses_hermes_home():
+    """load_accounts() reads accounts.yaml under hermes_home(); returns [] when absent."""
+    env_accounts_backup = os.environ.pop("EMAIL_MULTI_ACCOUNTS", None)
+    with tempfile.TemporaryDirectory() as tmp:
+        os.environ["HERMES_HOME"] = tmp
+        try:
+            cfg = _load_config()
+            result = cfg.load_accounts()
+            assert result == [], f"Expected [] with no accounts.yaml, got {result}"
+        finally:
+            os.environ.pop("HERMES_HOME", None)
+            if env_accounts_backup is not None:
+                os.environ["EMAIL_MULTI_ACCOUNTS"] = env_accounts_backup
+
+
+def test_no_module_level_mkdir_in_tools():
+    """tools.py must not call mkdir at module level (no import-time side effects)."""
+    source = (PLUGIN_DIR / "tools.py").read_text()
+    lines = source.splitlines()
+    in_function = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("def ") or stripped.startswith("class "):
+            in_function = True
+        if not in_function and "mkdir" in stripped:
+            raise AssertionError(
+                f"tools.py calls mkdir at module level (outside any function): {line!r}"
+            )
 
 
 def test_tools_has_datetime_encoder():
@@ -90,8 +156,12 @@ if __name__ == "__main__":
         test_datetime_encoder_datetime,
         test_datetime_encoder_date,
         test_datetime_encoder_nested,
-        test_cache_dir_path_uses_underscore,
-        test_accounts_yaml_path_uses_underscore,
+        test_hermes_home_in_config,
+        test_attachment_cache_uses_hermes_home,
+        test_hermes_home_default,
+        test_hermes_home_custom,
+        test_load_accounts_uses_hermes_home,
+        test_no_module_level_mkdir_in_tools,
         test_tools_has_datetime_encoder,
     ]
     failed = 0

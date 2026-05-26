@@ -24,6 +24,21 @@ cp -R hermes-multimail/email_multi ~/.hermes/plugins/email_multi
 
 Then enable `email_multi` in `~/.hermes/config.yaml`.
 
+### HERMES_HOME
+
+By default the plugin reads config from `~/.hermes/plugins/email_multi/accounts.yaml`
+and caches attachments under `~/.hermes/cache/email_multi/`.
+
+Set `HERMES_HOME` to use a different base directory (useful for multiple profiles or
+sandboxed testing):
+
+```bash
+export HERMES_HOME=/path/to/custom-hermes-home
+```
+
+Both the accounts config path and the attachment cache path are resolved relative to
+`HERMES_HOME` at call time, so changing it mid-session takes effect immediately.
+
 ## Configuration
 
 ### 1. Accounts
