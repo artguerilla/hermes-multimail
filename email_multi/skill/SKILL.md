@@ -19,7 +19,10 @@ List all configured email accounts.
 ### email_multi_poll_inbox
 Poll for unseen emails. Optional `account_id` to filter.
 
-### email_multi_search
+### email_multi_list_messages
+List messages from a folder with optional IMAP criteria. Requires `account_id`.
+
+### email_multi_search_messages
 Search emails with filters:
 - `subject`: search subject line
 - `from`: filter by sender
@@ -31,26 +34,37 @@ Search emails with filters:
 ### email_multi_read
 Read a message by UID. Set `download_attachments: true` to save locally.
 
+### email_multi_download_attachment
+Download one attachment from a message.
+
 ### email_multi_send
 Send email. Supports `html_body`, `cc`, and `attachments` (file paths).
 
 ### email_multi_reply
 Reply in-thread. Uses `In-Reply-To` and `References` headers automatically.
 
-## Configured Accounts
+### email_multi_list_folders
+List IMAP folders for one account.
+
+### email_multi_mark_seen
+Mark a message as seen.
+
+### email_multi_delete_message
+Delete a message by moving it to trash or expunging it in the selected folder.
+
+Hermes registers these 11 tools from `email_multi/schemas.py`. The implementation
+also keeps an internal compatibility handler named `email_multi_search`, but that
+alias is not registered as a separate exported Hermes tool. Use
+`email_multi_search_messages` for search calls.
+
+## Example Accounts
 
 | ID | Email | Provider |
 |---|---|---|
-| gmail | falk.mp@gmail.com | Gmail |
-| dieartguerilla | falk@dieartguerilla.de | Stalwart |
-| infodieg | info@dieartguerilla.de | Stalwart |
-| appwa2pdf | app@wa2pdf.de | Stalwart |
-| businessdieg | business@dieartguerilla.de | Stalwart |
+| personal | user@example.com | Example IMAP |
+| work | user@company.example | Company IMAP |
 
 ## Passwords
 Set in `~/.hermes/.env`:
-- `EMAIL_GMAIL_PASSWORD`
-- `EMAIL_DIEARTGUERILLA_PASSWORD`
-- `EMAIL_INFO_DIEG_PASSWORD`
-- `EMAIL_APP_WA2PDF_PASSWORD`
-- `EMAIL_BUSINESS_DIEG_PASSWORD`
+- `EMAIL_PERSONAL_PASSWORD`
+- `EMAIL_WORK_PASSWORD`
