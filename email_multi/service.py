@@ -642,9 +642,14 @@ def delete_message(account_id: str, message_uid: str, folder: Optional[str] = No
     """Move message to trash."""
     acc = get_account(account_id)
     folder = folder or acc["folders"]["inbox"]
+    trash_folder = acc.get("folders", {}).get("trash", "Trash")
     imap = _get_imap(acc)
     try:
         imap.select(folder)
+        if folder != trash_folder:
+            status, _ = imap.uid("copy", message_uid, trash_folder)
+            if status != "OK":
+                return False
         status, _ = imap.uid("store", message_uid, "+FLAGS", "\\Deleted")
         if status == "OK":
             imap.expunge()
