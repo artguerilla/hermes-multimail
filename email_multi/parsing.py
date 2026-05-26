@@ -6,6 +6,7 @@ Mirrors the Hermes gateway email adapter behavior.
 import email as email_lib
 import re
 from email.header import decode_header
+from email.utils import getaddresses, parseaddr
 from typing import List, Tuple
 
 
@@ -24,13 +25,23 @@ def decode_header_value(raw: str) -> str:
 
 
 def extract_email_address(raw: str) -> str:
-    """Extract bare email address from 'Name <addr>' format."""
+    """Extract bare email address from 'Name <addr>' or bare format."""
     if not raw:
         return ""
-    match = re.search(r"<([^>]+)>", raw)
-    if match:
-        return match.group(1).strip().lower()
-    return raw.strip().lower()
+    _, addr = parseaddr(raw)
+    return addr.strip().lower() if addr else raw.strip().lower()
+
+
+def parse_address_list(raw: str) -> List[str]:
+    """Parse a comma-separated address header into lowercase email addresses.
+
+    Handles both 'Display Name <addr@example.com>' and bare 'addr@example.com'
+    formats using the standard library parser.
+    """
+    if not raw:
+        return []
+    pairs = getaddresses([raw])
+    return [addr.lower() for _, addr in pairs if addr and "@" in addr]
 
 
 def extract_text_body(msg: email_lib.message.Message) -> str:
@@ -127,18 +138,7 @@ def extract_message_headers(msg: email_lib.message.Message) -> dict:
 
 def _extract_all_addresses(raw: str) -> List[str]:
     """Extract all email addresses from a To/Cc header."""
-    if not raw:
-        return []
-    addrs = []
-    for match in re.finditer(r"<([^>]+)>", raw):
-        addrs.append(match.group(1).strip().lower())
-    # Fallback: comma-separated bare addresses
-    if not addrs:
-        for part in raw.split(","):
-            part = part.strip().lower()
-            if "@" in part:
-                addrs.append(part)
-    return addrs
+    return parse_address_list(raw)
 
 
 # Automated sender detection (from Hermes adapter)
