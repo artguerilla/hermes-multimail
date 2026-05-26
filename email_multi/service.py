@@ -8,6 +8,7 @@ import email as email_lib
 import imaplib
 import logging
 import re
+import shlex
 import smtplib
 import ssl
 import uuid
@@ -64,6 +65,84 @@ def _send_imap_id(imap: imaplib.IMAP4) -> None:
         pass
 
 
+def _quote_imap_search_value(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _quote_gmail_raw_value(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _has_gmail_account_hint(acc: Optional[dict]) -> bool:
+    if not acc:
+        return False
+    values = [
+        acc.get("imap_host", ""),
+        acc.get("smtp_host", ""),
+        acc.get("email", ""),
+        acc.get("account_id", ""),
+    ]
+    return any("gmail" in str(value).lower() or "googlemail" in str(value).lower() for value in values)
+
+
+def _has_gmail_capability(imap: imaplib.IMAP4) -> bool:
+    capability_values = getattr(imap, "capabilities", None) or []
+    joined = b" ".join(
+        value if isinstance(value, bytes) else str(value).encode()
+        for value in capability_values
+    )
+    if b"X-GM-EXT-1" in joined.upper():
+        return True
+
+    try:
+        status, data = imap.capability()
+    except Exception:
+        return False
+    if status != "OK" or not data:
+        return False
+    joined = b" ".join(value if isinstance(value, bytes) else str(value).encode() for value in data)
+    return b"X-GM-EXT-1" in joined.upper()
+
+
+def _can_use_gmail_raw_search(imap: imaplib.IMAP4, acc: Optional[dict]) -> bool:
+    return _has_gmail_account_hint(acc) or _has_gmail_capability(imap)
+
+
+def _gmail_raw_query_from_criteria(criteria: str) -> Optional[str]:
+    """Translate a conservative subset of IMAP SEARCH criteria to Gmail raw query."""
+    try:
+        tokens = shlex.split(criteria)
+    except ValueError:
+        return None
+
+    raw_parts: List[str] = []
+    i = 0
+    while i < len(tokens):
+        key = tokens[i].upper()
+        if key == "ALL":
+            i += 1
+            continue
+        if key == "UNSEEN":
+            raw_parts.append("is:unread")
+            i += 1
+            continue
+        if key == "SUBJECT" and i + 1 < len(tokens):
+            raw_parts.append(f"subject:{_quote_gmail_raw_value(tokens[i + 1])}")
+            i += 2
+            continue
+        if key == "FROM" and i + 1 < len(tokens):
+            raw_parts.append(f"from:{_quote_gmail_raw_value(tokens[i + 1])}")
+            i += 2
+            continue
+        if key in {"TEXT", "BODY"} and i + 1 < len(tokens):
+            raw_parts.append(_quote_gmail_raw_value(tokens[i + 1]))
+            i += 2
+            continue
+        return None
+
+    return " ".join(raw_parts) if raw_parts else None
+
+
 Uid = Union[bytes, str]
 
 
@@ -105,8 +184,21 @@ def _search_uids(
     imap: imaplib.IMAP4,
     criteria: str,
     fallback_criteria: Optional[str] = None,
+    acc: Optional[dict] = None,
 ) -> List[bytes]:
     """Search UIDs, retrying without optional narrowing if the server rejects it."""
+    raw_query = None
+    if _can_use_gmail_raw_search(imap, acc):
+        raw_query = _gmail_raw_query_from_criteria(criteria)
+
+    if raw_query:
+        status, data = imap.uid("search", None, "X-GM-RAW", _quote_imap_search_value(raw_query))
+        if status == "OK":
+            if not data or not data[0]:
+                return []
+            return data[0].split()
+        logger.info("[email-multi] Gmail raw search rejected %r; retrying generic %r", raw_query, criteria)
+
     status, data = imap.uid("search", None, criteria)
     if status != "OK" and fallback_criteria and fallback_criteria != criteria:
         logger.info("[email-multi] IMAP search rejected %r; retrying %r", criteria, fallback_criteria)
@@ -274,7 +366,7 @@ def search_messages(
     imap = _get_imap(acc)
     try:
         imap.select(folder, readonly=True)
-        uids = _search_uids(imap, criteria, fallback_criteria=fallback_criteria)
+        uids = _search_uids(imap, criteria, fallback_criteria=fallback_criteria, acc=acc)
         selected = uids[-limit:]
         headers_by_uid = _fetch_headers(imap, selected)
         return [
@@ -350,7 +442,7 @@ def search_full_messages(
     imap = _get_imap(acc)
     try:
         imap.select(folder, readonly=True)
-        uids = _search_uids(imap, criteria, fallback_criteria=fallback_criteria)
+        uids = _search_uids(imap, criteria, fallback_criteria=fallback_criteria, acc=acc)
         selected = uids[-limit:]
         messages_by_uid = _fetch_full_messages(
             imap,
