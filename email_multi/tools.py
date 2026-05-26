@@ -12,8 +12,11 @@ from typing import Any, Dict, List, Optional
 
 from . import attachments, config, service
 
-ATTACHMENT_CACHE_DIR = Path.home() / ".cache" / "hermes" / "email_multi"
-ATTACHMENT_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+def _attachment_cache_dir() -> Path:
+    """Return the attachment cache dir under the active Hermes home."""
+    cache = config.hermes_home() / "cache" / "email_multi"
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache
 
 
 class _DateTimeEncoder(json.JSONEncoder):
@@ -223,7 +226,7 @@ def email_multi_read(params: dict) -> str:
         folder = params.get("folder")
         include_html = bool(params.get("include_html", False))
         download = bool(params.get("download_attachments", False))
-        save_dir = str(ATTACHMENT_CACHE_DIR / account_id / message_id) if download else None
+        save_dir = str(_attachment_cache_dir() / account_id / message_id) if download else None
 
         msg = service.get_message(
             account_id=account_id,
@@ -247,7 +250,7 @@ def email_multi_download_attachment(params: dict) -> str:
         message_id = params["message_id"]
         attachment_id = str(params["attachment_id"])
         folder = params.get("folder")
-        save_dir = ATTACHMENT_CACHE_DIR / account_id / message_id
+        save_dir = _attachment_cache_dir() / account_id / message_id
 
         msg = service.get_message(
             account_id=account_id,

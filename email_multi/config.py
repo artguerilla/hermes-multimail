@@ -1,7 +1,8 @@
 """Multi-account email configuration.
 
 Reads accounts from EMAIL_MULTI_ACCOUNTS env var (JSON) or
-from a config file at ~/.hermes/plugins/email_multi/accounts.yaml.
+from a config file at $HERMES_HOME/plugins/email_multi/accounts.yaml
+(defaults to ~/.hermes when HERMES_HOME is unset).
 
 Each account:
   account_id: gmail
@@ -29,15 +30,25 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 
-ACCOUNTS_YAML = Path.home() / ".hermes" / "plugins" / "email_multi" / "accounts.yaml"
 ACCOUNTS_ENV = "EMAIL_MULTI_ACCOUNTS"
+HERMES_HOME_ENV = "HERMES_HOME"
+
+
+def hermes_home() -> Path:
+    """Return the active Hermes home directory.
+
+    Uses HERMES_HOME env var when set; defaults to ~/.hermes.
+    """
+    env = os.getenv(HERMES_HOME_ENV)
+    return Path(env) if env else Path.home() / ".hermes"
 
 
 def load_accounts() -> List[Dict[str, Any]]:
     """Load account configs from YAML file or env var."""
+    accounts_yaml = hermes_home() / "plugins" / "email_multi" / "accounts.yaml"
     # Try YAML file first
-    if ACCOUNTS_YAML.exists():
-        with open(ACCOUNTS_YAML) as f:
+    if accounts_yaml.exists():
+        with open(accounts_yaml) as f:
             data = yaml.safe_load(f)
         if isinstance(data, dict) and "accounts" in data:
             return _resolve_accounts(data["accounts"])
