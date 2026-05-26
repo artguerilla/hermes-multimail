@@ -31,15 +31,22 @@ def _raw_message(uid: int, body: str = "hello keyword") -> bytes:
 
 
 class FakeIMAP:
-    def __init__(self, count=3, search_responses=None, reject_batch_fetch=False):
+    def __init__(self, count=3, search_responses=None, reject_batch_fetch=False, capabilities=None):
         self.messages = {str(uid): _raw_message(uid) for uid in range(1, count + 1)}
         self.search_responses = search_responses or [
             ("OK", [b" ".join(str(uid).encode() for uid in range(1, count + 1))])
         ]
         self.reject_batch_fetch = reject_batch_fetch
+        self.capabilities = capabilities or []
         self.commands = []
         self.selected = []
         self.logged_out = False
+
+    def capability(self):
+        return "OK", [b" ".join(
+            value if isinstance(value, bytes) else str(value).encode()
+            for value in self.capabilities
+        )]
 
     def select(self, folder, readonly=False):
         self.selected.append((folder, readonly))
@@ -158,6 +165,70 @@ class ImapSearchPerformanceTests(unittest.TestCase):
 
         searches = [args[1] for command, args in fake.commands if command == "search"]
         self.assertEqual(searches, ['TEXT "keyword"', "ALL"])
+        self.assertEqual(result[0]["uid"], "1")
+
+    def test_gmail_capable_path_uses_x_gm_raw(self):
+        fake = FakeIMAP(count=1, capabilities=[b"IMAP4rev1", b"X-GM-EXT-1"])
+        with patch.object(service, "get_account", return_value=self.account), patch.object(
+            service,
+            "_get_imap",
+            return_value=fake,
+        ):
+            result = service.search_messages(
+                "acct",
+                criteria='SUBJECT "Billing" TEXT "invoice"',
+                limit=1,
+            )
+
+        searches = [args for command, args in fake.commands if command == "search"]
+        self.assertEqual(searches[0][1], "X-GM-RAW")
+        self.assertIn("subject:", searches[0][2])
+        self.assertIn("Billing", searches[0][2])
+        self.assertIn("invoice", searches[0][2])
+        self.assertEqual(len(searches), 1)
+        self.assertEqual(result[0]["uid"], "1")
+
+    def test_non_gmail_path_keeps_generic_search(self):
+        fake = FakeIMAP(count=1)
+        with patch.object(service, "get_account", return_value=self.account), patch.object(
+            service,
+            "_get_imap",
+            return_value=fake,
+        ):
+            result = service.search_messages(
+                "acct",
+                criteria='SUBJECT "Billing" TEXT "invoice"',
+                limit=1,
+            )
+
+        searches = [args for command, args in fake.commands if command == "search"]
+        self.assertEqual(searches, [(None, 'SUBJECT "Billing" TEXT "invoice"')])
+        self.assertEqual(result[0]["uid"], "1")
+
+    def test_rejected_x_gm_raw_falls_back_safely(self):
+        account = {**self.account, "imap_host": "imap.gmail.com", "email": "reader@gmail.com"}
+        fake = FakeIMAP(
+            count=1,
+            search_responses=[
+                ("BAD", [b"unsupported search key"]),
+                ("OK", [b"1"]),
+            ],
+        )
+        with patch.object(service, "get_account", return_value=account), patch.object(
+            service,
+            "_get_imap",
+            return_value=fake,
+        ):
+            result = service.search_messages(
+                "acct",
+                criteria='TEXT "invoice"',
+                fallback_criteria="ALL",
+                limit=1,
+            )
+
+        searches = [args for command, args in fake.commands if command == "search"]
+        self.assertEqual(searches[0][1], "X-GM-RAW")
+        self.assertEqual(searches[1], (None, 'TEXT "invoice"'))
         self.assertEqual(result[0]["uid"], "1")
 
 
