@@ -7,16 +7,14 @@ Mirrors Hermes gateway adapter attachment behavior:
 """
 
 import mimetypes
-import os
 import re
-from email import encoders
+from email.header import decode_header
+from email.mime.application import MIMEApplication
+from email.mime.audio import MIMEAudio
 from email.mime.base import MIMEBase
 from email.mime.image import MIMEImage
-from email.mime.audio import MIMEAudio
-from email.mime.application import MIMEApplication
-from email.header import decode_header
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".tiff"}
@@ -152,7 +150,7 @@ def create_attachment_part(file_path: str, filename: Optional[str] = None) -> MI
     """Create a MIME attachment part from a local file."""
     p = Path(file_path)
     fname = filename or p.name
-    content_type, encoding = mimetypes.guess_type(str(p))
+    content_type, _ = mimetypes.guess_type(str(p))
 
     with open(p, "rb") as f:
         data = f.read()
