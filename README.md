@@ -180,9 +180,17 @@ python3 -m unittest tests/test_delete_semantics.py
 
 - **Dedicated mail accounts** — use purpose-built email addresses, not personal inboxes
 - **App passwords** — use app-specific passwords instead of main credentials (especially Gmail with 2FA)
-- **No plaintext secrets** — passwords resolved from environment variables only
+- **No plaintext secrets** — passwords resolved from environment variables only.
+  If a `password_env` variable is referenced but not set, the plugin raises a clear
+  `EnvironmentError` at load time instead of failing silently at connection time.
 - **Access control** — `allowed_users` and `allow_all` per account
 - **Skip attachments** — `skip_attachments: true` disables attachment downloads
+
+## Development
+
+- **CONTRIBUTING**: See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, and PR guidelines.
+- **Bug reports**: Use [GitHub Issues](https://github.com/artguerilla/hermes-multimail/issues/new?template=bug_report.md)
+- **Feature requests**: Use [GitHub Issues](https://github.com/artguerilla/hermes-multimail/issues/new?template=feature_request.md)
 
 ## License
 

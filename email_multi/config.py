@@ -6,13 +6,13 @@ from a config file at $HERMES_HOME/plugins/email_multi/accounts.yaml
 
 Each account:
   account_id: gmail
-  email: falk.mp@gmail.com
+  email: user@gmail.com
   imap_host: imap.gmail.com
   imap_port: 993
   smtp_host: smtp.gmail.com
   smtp_port: 587
   password_env: EMAIL_GMAIL_PASSWORD  # resolved from env
-  allowed_users: [falk.mp@gmail.com]
+  allowed_users: [operator@example.com]
   allow_all: false
   skip_attachments: false
   folders:
@@ -74,7 +74,14 @@ def _resolve_accounts(accounts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         resolved_acc = dict(acc)
         password_env = resolved_acc.pop("password_env", None)
         if password_env:
-            resolved_acc["password"] = os.environ.get(password_env, "")
+            password = os.environ.get(password_env, "")
+            if not password:
+                raise EnvironmentError(
+                    f"Account '{resolved_acc.get('account_id', '?')}': "
+                    f"environment variable '{password_env}' is not set or empty. "
+                    f"Set it in your .env file and restart Hermes."
+                )
+            resolved_acc["password"] = password
         # Defaults
         resolved_acc.setdefault("imap_port", 993)
         resolved_acc.setdefault("smtp_port", 587)

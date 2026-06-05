@@ -57,6 +57,27 @@ accounts:
         self.assertEqual(accounts[0]["password"], "secret-value")
         self.assertNotIn("password_env", accounts[0])
 
+    def test_load_accounts_raises_when_password_env_missing(self):
+        """If password_env references an unset env var, raise EnvironmentError."""
+        # Ensure the env var is definitely not set
+        os.environ.pop("MISSING_TEST_PASSWORD", None)
+        self._write_accounts_yaml(
+            """
+accounts:
+  - account_id: broken
+    email: broken@example.com
+    imap_host: imap.example.com
+    smtp_host: smtp.example.com
+    password_env: MISSING_TEST_PASSWORD
+"""
+        )
+
+        with self.assertRaises(EnvironmentError) as ctx:
+            config.load_accounts()
+
+        self.assertIn("MISSING_TEST_PASSWORD", str(ctx.exception))
+        self.assertIn("broken", str(ctx.exception))
+
     def test_load_accounts_from_json_env_when_yaml_absent(self):
         os.environ[config.ACCOUNTS_ENV] = json.dumps(
             {

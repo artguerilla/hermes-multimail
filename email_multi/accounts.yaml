@@ -3,7 +3,7 @@
 
 accounts:
   - account_id: gmail
-    email: your-email@gmail.com
+    email: user@example.com
     display_name: Gmail
     password_env: EMAIL_GMAIL_PASSWORD
     imap_host: imap.gmail.com

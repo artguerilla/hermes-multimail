@@ -1,4 +1,4 @@
-"""Tool handlers for email-multi plugin.
+"""Tool handlers for the email_multi plugin.
 
 Thin wrapper around config/service/parsing/attachments modules.
 """

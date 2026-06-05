@@ -1,3 +1,25 @@
-name: email-multi
+name: email_multi
 version: "1.0"
-description: Multi-account IMAP/SMTP email adapter — search, read, send emails across multiple mailboxes
+description: >
+  Multi-account IMAP/SMTP email adapter for Hermes Agent.
+  Manage multiple concurrent mailboxes — search, read, send, reply,
+  and download attachments across different email providers.
+  Per-account access control via allowlists. No core Hermes modifications needed.
+tools:
+  - email_multi_list_accounts
+  - email_multi_poll_inbox
+  - email_multi_list_messages
+  - email_multi_search_messages
+  - email_multi_read
+  - email_multi_download_attachment
+  - email_multi_send
+  - email_multi_reply
+  - email_multi_list_folders
+  - email_multi_mark_seen
+  - email_multi_delete_message
+dependencies:
+  - PyYAML>=6.0
+config:
+  file: accounts.yaml
+  env_var: EMAIL_MULTI_ACCOUNTS
+  path: "$HERMES_HOME/plugins/email_multi/accounts.yaml"

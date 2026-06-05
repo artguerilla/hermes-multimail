@@ -1,4 +1,4 @@
-# Python
+# ── Python ──────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
@@ -6,24 +6,65 @@ __pycache__/
 *.egg
 dist/
 build/
+.eggs/
+*.so
 
-# Environment
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# ── Environment / Secrets ───────────────────────────────
 .env
+.env.*
 .env.local
-.env.*.local
+.env.production
+!.env.example
 
-# OS
+# Account configs with credentials
+email_multi/accounts.yaml
+
+# Hermes plugin cache & runtime
+email_multi/__pycache__/
+cache/
+
+# ── OS ──────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# IDE
+# ── IDE / Editors ───────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+*.sublime-*
+.project
+.settings/
 
-# Hermes plugin cache (not committed)
-email-multi/__pycache__/
-*.pyc
-*.pyo
+# ── Testing ─────────────────────────────────────────────
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
+*.log
+
+# ── Build artifacts ─────────────────────────────────────
+*.whl
+*.tar.gz
+MANIFEST
+
+# ── Pre-commit / Ruff / Linters ─────────────────────────
+.ruff_cache/
+.mypy_cache/
+.dmypy.json
+
+# ── OS-specific ──────────────────────────────────────────
+*.pid
+*.sock
+
+# ── Temporary / Scratch ─────────────────────────────────
+tmp/
+temp/
