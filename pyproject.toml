@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=64", "wheel"]
-build-backend = "setuptools.backends._legacy:_Backend"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-multimail"
@@ -35,6 +35,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 include = ["email_multi*"]
+
+[tool.setuptools.package-data]
+email_multi = ["plugin.yaml", "accounts.example.yaml", "skill/SKILL.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
