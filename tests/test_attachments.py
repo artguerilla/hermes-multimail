@@ -14,6 +14,7 @@ from email_multi.attachments import (  # noqa: E402
     decode_filename,
     extract_attachments,
     media_path_to_attachment,
+    sanitize_attachment_filename,
 )
 
 
@@ -37,12 +38,37 @@ def _message_with_attachments():
     return msg
 
 
+def _message_with_attachment(filename: str, payload: bytes = b"payload"):
+    msg = EmailMessage()
+    msg["Subject"] = "malicious attachment"
+    msg.set_content("plain body")
+    msg.add_attachment(
+        payload,
+        maintype="application",
+        subtype="octet-stream",
+        filename=filename,
+    )
+    return msg
+
+
 class AttachmentTests(unittest.TestCase):
     def test_decode_filename_handles_rfc_2047(self):
         self.assertEqual(decode_filename("=?utf-8?b?UsOpc3Vtw6kucGRm?="), "Résumé.pdf")
 
     def test_decode_filename_empty_defaults_to_attachment_bin(self):
         self.assertEqual(decode_filename(""), "attachment.bin")
+
+    def test_sanitize_attachment_filename_strips_unix_path_traversal(self):
+        self.assertEqual(sanitize_attachment_filename("../../evil.txt"), "evil.txt")
+
+    def test_sanitize_attachment_filename_strips_absolute_paths(self):
+        self.assertEqual(sanitize_attachment_filename("/etc/passwd"), "passwd")
+
+    def test_sanitize_attachment_filename_strips_windows_path_traversal(self):
+        self.assertEqual(sanitize_attachment_filename("..\\..\\evil.txt"), "evil.txt")
+
+    def test_sanitize_attachment_filename_falls_back_when_empty(self):
+        self.assertEqual(sanitize_attachment_filename("../.."), "attachment.bin")
 
     def test_classify_attachment_by_extension(self):
         self.assertEqual(classify_attachment("photo.jpg", "image/jpeg"), "image")
@@ -91,6 +117,38 @@ class AttachmentTests(unittest.TestCase):
             self.assertEqual([path.name for path in paths], ["photo.png", "report.pdf"])
             self.assertEqual(paths[0].read_bytes(), b"image-bytes")
             self.assertEqual(paths[1].read_bytes(), b"pdf-bytes")
+
+    def test_extract_attachments_saves_malicious_names_inside_save_dir(self):
+        malicious_names = ["../../evil.txt", "/tmp/evil.txt", "..\\..\\evil.txt"]
+        for malicious_name in malicious_names:
+            with self.subTest(malicious_name=malicious_name):
+                with tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp).resolve()
+                    save_dir = root / "cache"
+                    attachments = extract_attachments(
+                        _message_with_attachment(malicious_name, payload=b"safe"),
+                        save_dir=str(save_dir),
+                    )
+
+                    self.assertEqual(len(attachments), 1)
+                    saved_path = Path(attachments[0]["path"]).resolve()
+                    self.assertTrue(saved_path.is_relative_to(save_dir.resolve()))
+                    self.assertEqual(saved_path.read_bytes(), b"safe")
+                    self.assertNotIn("..", saved_path.parts)
+
+    def test_extract_attachments_avoids_overwriting_duplicate_filenames(self):
+        msg = EmailMessage()
+        msg.set_content("plain body")
+        msg.add_attachment(b"first", maintype="application", subtype="octet-stream", filename="same.txt")
+        msg.add_attachment(b"second", maintype="application", subtype="octet-stream", filename="same.txt")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            attachments = extract_attachments(msg, save_dir=tmp)
+            paths = [Path(item["path"]) for item in attachments]
+
+            self.assertEqual([path.name for path in paths], ["same.txt", "same-1.txt"])
+            self.assertEqual(paths[0].read_bytes(), b"first")
+            self.assertEqual(paths[1].read_bytes(), b"second")
 
     def test_extract_attachments_without_filename_uses_content_type_extension(self):
         msg = EmailMessage()
