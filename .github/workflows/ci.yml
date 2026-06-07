@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - main
+  push:
+    branches:
+      - dev
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pr-flow-guard:
+    name: PR flow guard
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Enforce dev promotion into main
+        if: github.event_name == 'pull_request' && github.base_ref == 'main'
+        run: |
+          if [ "${{ github.head_ref }}" != "dev" ]; then
+            echo "PRs into main must come from dev only."
+            echo "Current source branch: ${{ github.head_ref }}"
+            exit 1
+          fi
+
+      - name: Allow feature PRs into dev
+        if: github.event_name == 'pull_request' && github.base_ref == 'dev'
+        run: |
+          echo "Feature PR into dev is allowed."
+
+      - name: Push event
+        if: github.event_name == 'push'
+        run: |
+          echo "Push validation for ${{ github.ref_name }}."
+
+  dependabot-config:
+    name: Dependabot config required
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Dependabot config exists
+        run: |
+          test -f .github/dependabot.yml
+
+      - name: Verify required ecosystems
+        run: |
+          grep -q 'package-ecosystem: "github-actions"' .github/dependabot.yml
+          grep -q 'package-ecosystem: "pip"' .github/dependabot.yml
+
+      - name: Verify Dependabot targets dev
+        run: |
+          count="$(grep -c 'target-branch: "dev"' .github/dependabot.yml)"
+          if [ "$count" -lt 2 ]; then
+            echo "Dependabot updates must target dev for both ecosystems."
+            exit 1
+          fi
+
+  sanitize:
+    name: Public sanitize guard
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Block private workflow/config files
+        run: |
+          test ! -e AGENTS.md
+          test ! -e CLAUDE.md
+          test ! -d .claude
+          test ! -d .hermes
+          test ! -d .codex
+          test ! -d .agents
+          test ! -d email-multi
+          test ! -f email_multi/accounts.yaml
+
+      - name: Block committed env files
+        run: |
+          if find . -maxdepth 3 \( -name ".env" -o -name ".env.*" \) ! -name ".env.example" -print -quit | grep -q .; then
+            echo "Real .env file detected. Only .env.example may be committed."
+            exit 1
+          fi
+
+      - name: Scan for common token patterns
+        run: |
+          if grep -RniE "(sk-[A-Za-z0-9_-]{20,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16})" \
+            --exclude-dir=.git \
+            --exclude-dir=dist \
+            --exclude-dir=build \
+            --exclude-dir=.pytest_cache \
+            --exclude-dir=.ruff_cache \
+            .; then
+            echo "Potential secret/token pattern detected."
+            exit 1
+          fi
+
+  test:
+    name: Test Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    needs:
+      - pr-flow-guard
+      - dependabot-config
+      - sanitize
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version:
+          - "3.9"
+          - "3.10"
+          - "3.11"
+          - "3.12"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install package with dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Syntax check
+        run: python -m py_compile email_multi/*.py
+
+      - name: Unit tests
+        run: python -m unittest
+
+      - name: Ruff lint
+        run: ruff check email_multi tests
+
+  package:
+    name: Build package
+    runs-on: ubuntu-latest
+    needs:
+      - test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Validate package metadata
+        run: twine check dist/*
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-multimail-dist
+          path: dist/*
+          if-no-files-found: error
