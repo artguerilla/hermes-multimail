@@ -1,11 +1,13 @@
-"""Tests for account config loading and environment resolution."""
+"""Tests for account config loading and environment resolution.
+
+Security: plaintext passwords are rejected; password_env is required.
+"""
 import json
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -57,6 +59,54 @@ accounts:
         self.assertEqual(accounts[0]["password"], "secret-value")
         self.assertNotIn("password_env", accounts[0])
 
+    def test_plaintext_password_rejected(self):
+        self._write_accounts_yaml(
+            """
+accounts:
+  - account_id: work
+    email: work@example.com
+    imap_host: imap.example.com
+    smtp_host: smtp.example.com
+    password: plaintext-secret
+"""
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            config.load_accounts()
+        self.assertIn("Plaintext", str(ctx.exception))
+        self.assertIn("password_env", str(ctx.exception))
+
+    def test_missing_password_env_rejected(self):
+        self._write_accounts_yaml(
+            """
+accounts:
+  - account_id: work
+    email: work@example.com
+    imap_host: imap.example.com
+    smtp_host: smtp.example.com
+"""
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            config.load_accounts()
+        self.assertIn("password_env", str(ctx.exception))
+
+    def test_empty_password_env_var_rejected(self):
+        self._write_accounts_yaml(
+            """
+accounts:
+  - account_id: work
+    email: work@example.com
+    imap_host: imap.example.com
+    smtp_host: smtp.example.com
+    password_env: UNSET_VAR_XYZ
+"""
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            config.load_accounts()
+        self.assertIn("UNSET_VAR_XYZ", str(ctx.exception))
+
     def test_load_accounts_from_json_env_when_yaml_absent(self):
         os.environ[config.ACCOUNTS_ENV] = json.dumps(
             {
@@ -66,16 +116,19 @@ accounts:
                         "email": "me@example.com",
                         "imap_host": "imap.example.com",
                         "smtp_host": "smtp.example.com",
+                        "password_env": "TEST_EMAIL_PASSWORD",
                     }
                 ]
             }
         )
+        os.environ["TEST_EMAIL_PASSWORD"] = "secret-value"
 
         accounts = config.load_accounts()
 
         self.assertEqual([account["account_id"] for account in accounts], ["personal"])
 
     def test_defaults_are_applied_to_minimal_account(self):
+        os.environ["TEST_EMAIL_PASSWORD"] = "secret-value"
         os.environ[config.ACCOUNTS_ENV] = json.dumps(
             [
                 {
@@ -83,6 +136,7 @@ accounts:
                     "email": "minimal@example.com",
                     "imap_host": "imap.example.com",
                     "smtp_host": "smtp.example.com",
+                    "password_env": "TEST_EMAIL_PASSWORD",
                 }
             ]
         )
@@ -106,6 +160,7 @@ accounts:
         )
 
     def test_explicit_defaults_are_preserved(self):
+        os.environ["TEST_EMAIL_PASSWORD"] = "secret-value"
         os.environ[config.ACCOUNTS_ENV] = json.dumps(
             [
                 {
@@ -115,7 +170,8 @@ accounts:
                     "imap_port": 1993,
                     "smtp_host": "smtp.example.com",
                     "smtp_port": 2525,
-                    "allowed_users": ["operator@example.com"],
+                    "password_env": "TEST_EMAIL_PASSWORD",
+                    "allowed_users": ["user@example.com"],
                     "allow_all": True,
                     "skip_attachments": True,
                     "poll_interval": 60,
@@ -128,7 +184,7 @@ accounts:
 
         self.assertEqual(account["imap_port"], 1993)
         self.assertEqual(account["smtp_port"], 2525)
-        self.assertEqual(account["allowed_users"], ["operator@example.com"])
+        self.assertEqual(account["allowed_users"], ["user@example.com"])
         self.assertTrue(account["allow_all"])
         self.assertTrue(account["skip_attachments"])
         self.assertEqual(account["poll_interval"], 60)
@@ -138,10 +194,11 @@ accounts:
         self.assertEqual(account["folders"]["drafts"], "Drafts")
 
     def test_get_account_and_list_account_ids_return_stable_ids(self):
+        os.environ["TEST_EMAIL_PASSWORD"] = "secret-value"
         os.environ[config.ACCOUNTS_ENV] = json.dumps(
             [
-                {"account_id": "first", "email": "first@example.com", "imap_host": "imap1", "smtp_host": "smtp1"},
-                {"account_id": "second", "email": "second@example.com", "imap_host": "imap2", "smtp_host": "smtp2"},
+                {"account_id": "first", "email": "first@example.com", "imap_host": "imap1", "smtp_host": "smtp1", "password_env": "TEST_EMAIL_PASSWORD"},
+                {"account_id": "second", "email": "second@example.com", "imap_host": "imap2", "smtp_host": "smtp2", "password_env": "TEST_EMAIL_PASSWORD"},
             ]
         )
 

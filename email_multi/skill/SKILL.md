@@ -52,10 +52,7 @@ Mark a message as seen.
 ### email_multi_delete_message
 Delete a message by moving it to trash or expunging it in the selected folder.
 
-Hermes registers these 11 tools from `email_multi/schemas.py`. The implementation
-also keeps an internal compatibility handler named `email_multi_search`, but that
-alias is not registered as a separate exported Hermes tool. Use
-`email_multi_search_messages` for search calls.
+The plugin registers 11 tools. Use `email_multi_search_messages` for search calls.
 
 ## Example Accounts
 
@@ -65,6 +62,9 @@ alias is not registered as a separate exported Hermes tool. Use
 | work | user@company.example | Company IMAP |
 
 ## Passwords
-Set in `~/.hermes/.env`:
+
+Set password environment variables in your environment (never in config files):
 - `EMAIL_PERSONAL_PASSWORD`
 - `EMAIL_WORK_PASSWORD`
+
+Reference them in accounts.yaml via `password_env`.

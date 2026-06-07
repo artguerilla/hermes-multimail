@@ -1,0 +1,44 @@
+# Example accounts configuration for email-multi plugin
+# Copy to ~/.hermes/plugins/email_multi/accounts.yaml and customize.
+#
+# IMPORTANT:
+# - Never store plaintext passwords. Use password_env to reference env vars.
+# - Set allowed_users or allow_all for each account (fail-closed by default).
+# - See .env.example for environment variable setup.
+
+accounts:
+  - account_id: gmail
+    email: your-email@gmail.com
+    display_name: Gmail
+    password_env: EMAIL_GMAIL_PASSWORD
+    imap_host: imap.gmail.com
+    imap_port: 993
+    smtp_host: smtp.gmail.com
+    smtp_port: 587
+    allowed_users:
+      - your-email@gmail.com
+    allow_all: false
+    skip_attachments: false
+    folders:
+      inbox: INBOX
+      sent: "[Gmail]/Sent Mail"
+      drafts: "[Gmail]/Drafts"
+      trash: "[Gmail]/Trash"
+
+  - account_id: company
+    email: your-email@company.com
+    display_name: Work
+    password_env: EMAIL_COMPANY_PASSWORD
+    imap_host: imap.company.com
+    imap_port: 993
+    smtp_host: smtp.company.com
+    smtp_port: 587
+    allowed_users:
+      - your-email@company.com
+    allow_all: false
+    skip_attachments: false
+    folders:
+      inbox: INBOX
+      sent: Sent
+      drafts: Drafts
+      trash: Trash

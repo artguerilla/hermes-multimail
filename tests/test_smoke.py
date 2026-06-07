@@ -14,7 +14,6 @@ import ast
 import importlib.util
 import json
 import os
-import re
 import sys
 import tempfile
 import unittest

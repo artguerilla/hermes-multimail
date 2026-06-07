@@ -1,5 +1,8 @@
 # Email accounts for email-multi plugin
-# Passwords resolved from environment variables (never store plaintext here!)
+# Copy to ~/.hermes/plugins/email_multi/accounts.yaml and customize.
+#
+# IMPORTANT: Use password_env to reference environment variables.
+# Plaintext passwords are rejected.
 
 accounts:
   - account_id: gmail
@@ -10,7 +13,8 @@ accounts:
     imap_port: 993
     smtp_host: smtp.gmail.com
     smtp_port: 587
-    allowed_users: []
+    allowed_users:
+      - your-email@gmail.com
     allow_all: false
     skip_attachments: false
     folders:

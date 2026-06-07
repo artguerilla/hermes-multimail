@@ -7,16 +7,13 @@ Mirrors Hermes gateway adapter attachment behavior:
 """
 
 import mimetypes
-import os
-from email import encoders
+from email.header import decode_header
+from email.mime.application import MIMEApplication
+from email.mime.audio import MIMEAudio
 from email.mime.base import MIMEBase
 from email.mime.image import MIMEImage
-from email.mime.audio import MIMEAudio
-from email.mime.application import MIMEApplication
-from email.header import decode_header
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any, Dict, List, Optional
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".tiff"}
 _AUDIO_EXTS = {".mp3", ".ogg", ".wav", ".m4a", ".aac", ".flac"}

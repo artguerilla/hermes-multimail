@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from . import attachments, auth, config, service
 
+
 def _attachment_cache_dir() -> Path:
     """Return the attachment cache dir under the active Hermes home."""
     cache = config.hermes_home() / "cache" / "email_multi"

@@ -7,7 +7,7 @@ import email as email_lib
 import re
 from email.header import decode_header
 from email.utils import getaddresses, parseaddr
-from typing import List, Tuple
+from typing import List
 
 
 def decode_header_value(raw: str) -> str:

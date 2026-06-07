@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-multimail"
+version = "1.0.0"
+description = "Multi-account IMAP/SMTP email plugin for Hermes Agent"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.9"
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "build",
+    "twine",
+]
+
+[project.entry-points."hermes_agent.plugins"]
+email_multi = "email_multi:register"
+
+[tool.setuptools.packages.find]
+include = ["email_multi*"]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

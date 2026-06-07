@@ -6,6 +6,8 @@ __pycache__/
 *.egg
 dist/
 build/
+*.tar.gz
+*.whl
 
 # Environment
 .env
@@ -23,7 +25,12 @@ Thumbs.db
 *.swo
 *~
 
-# Hermes plugin cache (not committed)
-email-multi/__pycache__/
-*.pyc
-*.pyo
+# Test coverage
+.coverage
+htmlcov/
+
+# Hermes plugin cache
+email_multi/__pycache__/
+
+# Ruff
+.ruff_cache/

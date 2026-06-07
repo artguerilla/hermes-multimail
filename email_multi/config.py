@@ -6,13 +6,13 @@ from a config file at $HERMES_HOME/plugins/email_multi/accounts.yaml
 
 Each account:
   account_id: gmail
-  email: falk.mp@gmail.com
+  email: user@gmail.com
   imap_host: imap.gmail.com
   imap_port: 993
   smtp_host: smtp.gmail.com
   smtp_port: 587
-  password_env: EMAIL_GMAIL_PASSWORD  # resolved from env
-  allowed_users: [falk.mp@gmail.com]
+  password_env: EMAIL_GMAIL_PASSWORD  # resolved from env (required)
+  allowed_users: [user@example.com]
   allow_all: false
   skip_attachments: false
   folders:
@@ -20,6 +20,10 @@ Each account:
     sent: "[Gmail]/Sent Mail"
     drafts: "[Gmail]/Drafts"
     trash: "[Gmail]/Trash"
+
+Security:
+  - Plaintext "password" in config is rejected; use "password_env" only.
+  - password_env must resolve to a non-empty value at runtime.
 """
 
 import json
@@ -28,7 +32,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
-
 
 ACCOUNTS_ENV = "EMAIL_MULTI_ACCOUNTS"
 HERMES_HOME_ENV = "HERMES_HOME"
@@ -68,13 +71,36 @@ def load_accounts() -> List[Dict[str, Any]]:
 
 
 def _resolve_accounts(accounts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Resolve password_env references and apply defaults."""
+    """Resolve password_env references and apply defaults.
+
+    Security: rejects plaintext "password" field; requires "password_env".
+    """
     resolved = []
     for acc in accounts:
         resolved_acc = dict(acc)
+
+        # Reject plaintext passwords
+        if "password" in resolved_acc:
+            raise ValueError(
+                "Plaintext 'password' is not allowed. "
+                "Use 'password_env' to reference an environment variable."
+            )
+
+        # Require password_env
         password_env = resolved_acc.pop("password_env", None)
-        if password_env:
-            resolved_acc["password"] = os.environ.get(password_env, "")
+        if not password_env:
+            raise ValueError(
+                f"Account '{resolved_acc.get('account_id', '?')}' is missing required 'password_env' field. "
+                "Store credentials in environment variables and reference them via password_env."
+            )
+        password_value = os.environ.get(password_env, "")
+        if not password_value:
+            raise ValueError(
+                f"Environment variable '{password_env}' referenced by account "
+                f"'{resolved_acc.get('account_id', '?')}' is not set or empty."
+            )
+        resolved_acc["password"] = password_value
+
         # Defaults
         resolved_acc.setdefault("imap_port", 993)
         resolved_acc.setdefault("smtp_port", 587)

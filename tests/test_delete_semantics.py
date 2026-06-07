@@ -1,10 +1,10 @@
 """Tests for delete/trash IMAP command semantics."""
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -36,11 +36,15 @@ class FakeIMAP:
 
 class DeleteSemanticsTests(unittest.TestCase):
     def setUp(self):
+        os.environ.pop("EMAIL_MULTI_CALLER", None)
         self.account = {
             "account_id": "acct",
             "email": "acct@example.com",
             "folders": {"inbox": "INBOX", "trash": "Trash"},
         }
+
+    def tearDown(self):
+        os.environ.pop("EMAIL_MULTI_CALLER", None)
 
     def test_delete_from_non_trash_copies_to_trash_then_removes_from_origin(self):
         fake = FakeIMAP()
