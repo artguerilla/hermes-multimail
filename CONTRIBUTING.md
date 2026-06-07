@@ -29,14 +29,9 @@ twine check dist/*
 
 ## Public Sanitize Check
 
-Ensure no private or internal references remain:
-
-```bash
-! grep -RniE "agentos|agent-os|orchestrator|control plane|frankieandfriends|hunnid|Claude|Hermes Verify" \
-  --exclude-dir=.git \
-  --exclude=LICENSE \
-  .
-```
+Before release, run your own private denylist scan outside the repository.
+Do not commit private company names, customer names, internal project names,
+credentials, local runtime files, or agent-workflow metadata to the public repo.
 
 ## Plugin Structure
 
