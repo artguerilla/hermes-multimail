@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/hermes-multimail-header.png" alt="hermes-multimail — One Hermes plugin. Many inboxes. Less chaos." width="100%">
+  <img src=".github/assets/hermes-multimail-header.png" alt="hermes-multimail — One Hermes plugin. Many inboxes. Less chaos." width="100%">
 </p>
 
 <h1 align="center">hermes-multimail</h1>
