@@ -187,7 +187,7 @@ class PluginRegistrationTests(unittest.TestCase):
         self.assertTrue(skill_path.exists())
         self.assertEqual(
             ctx.skills,
-            [("email-multi", skill_path, "Multi-account IMAP/SMTP email workflow")],
+            [("email-multi", skill_path)],
         )
 
 

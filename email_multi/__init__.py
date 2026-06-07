@@ -30,4 +30,4 @@ def register(ctx):
     # Register bundled skill documentation
     skill_md = PLUGIN_DIR / "skill" / "SKILL.md"
     if skill_md.exists():
-        ctx.register_skill("email-multi", skill_md, "Multi-account IMAP/SMTP email workflow")
+        ctx.register_skill("email-multi", skill_md)

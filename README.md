@@ -38,10 +38,21 @@ In `~/.hermes/config.yaml`:
 ```yaml
 plugins:
   enabled:
-    - email_multi
+    - email-multi
 ```
 
 Then restart Hermes.
+
+### Naming
+
+The plugin uses **hyphens** for the plugin name and **underscores** for Python/tool names:
+
+| Context | Name |
+|---|---|
+| `plugins.enabled` in config | `email-multi` |
+| Python package | `email_multi` |
+| Tool names | `email_multi_list_accounts`, etc. |
+| Skill name | `email-multi` |
 
 ## Configuration
 
