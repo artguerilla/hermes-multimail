@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from . import schemas, tools
+from . import auth, config, schemas, service, tools
 
 PLUGIN_DIR = Path(__file__).resolve().parent
 
