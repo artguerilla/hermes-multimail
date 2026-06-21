@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from . import auth, config, schemas, service, tools
+from . import auth, config, schemas, service, tools  # noqa: F401
 
 PLUGIN_DIR = Path(__file__).resolve().parent
 

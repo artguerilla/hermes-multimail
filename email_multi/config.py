@@ -37,7 +37,7 @@ import yaml
 ACCOUNTS_ENV = "EMAIL_MULTI_ACCOUNTS"
 HERMES_HOME_ENV = "HERMES_HOME"
 
-_accounts_cache: List[Dict[str, Any]] | None = None
+_accounts_cache: Optional[List[Dict[str, Any]]] = None
 _accounts_cache_time: float = 0
 _ACCOUNTS_CACHE_TTL = 60  # seconds
 

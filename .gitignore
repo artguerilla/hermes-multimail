@@ -9,8 +9,8 @@ build/
 *.tar.gz
 *.whl
 
-# Environment
-.env
+# Virtual environment
+.venv/
 .env.local
 .env.*.local
 
