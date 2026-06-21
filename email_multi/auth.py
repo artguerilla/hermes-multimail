@@ -1,18 +1,17 @@
 """Access-control enforcement for email-multi plugin.
 
-Caller identity resolution (fail-closed by default):
+Caller identity resolution:
   1. EMAIL_MULTI_CALLER env var — trusted runtime identity set by the gateway
-  2. params["caller"] — ONLY when EMAIL_MULTI_TRUST_CALLER_PARAM=true
-
-By default params["caller"] is NOT trusted. Set EMAIL_MULTI_TRUST_CALLER_PARAM=true
-if your Hermes gateway injects a verified caller identity into tool call params.
+  2. params["caller"] — trusted by default (Hermes gateway injects verified caller)
+  3. EMAIL_MULTI_TRUST_CALLER_PARAM=false to disable param trust (lockdown mode)
 
 When an account has a non-empty allowed_users list and allow_all is False,
 access is denied if the caller is not on the list.  If caller identity is
 unavailable in that configuration the plugin fails closed (denies access).
 
-Accounts with an empty allowed_users list (the default) also fail closed —
-explicit allowlists or allow_all=true are required for any access.
+Accounts with an empty allowed_users list and allow_all=false are treated as
+open when EMAIL_MULTI_TRUST_CALLER_PARAM is not explicitly false — this is
+the default for local Hermes usage.
 """
 
 import os
@@ -29,13 +28,16 @@ def get_caller_identity(params: dict) -> Optional[str]:
 
     Identity sources (in priority order):
       1. EMAIL_MULTI_CALLER env var — always trusted
-      2. params["caller"] — only when EMAIL_MULTI_TRUST_CALLER_PARAM=true
+      2. params["caller"] — trusted by default (Hermes gateway injects it)
     """
     env_caller = os.getenv(CALLER_ENV, "").strip()
     if env_caller:
         return env_caller.lower()
 
-    if os.getenv(TRUST_CALLER_PARAM_ENV, "").lower() == "true":
+    # Trust params["caller"] by default. Explicitly disable with
+    # EMAIL_MULTI_TRUST_CALLER_PARAM=false for lockdown mode.
+    trust_param = os.getenv(TRUST_CALLER_PARAM_ENV, "true").lower()
+    if trust_param != "false":
         caller = (params.get("caller") or "").strip()
         if caller:
             return caller.lower()
@@ -48,7 +50,8 @@ def _account_allows(acc: dict, caller: Optional[str]) -> bool:
         return True
     allowed = [a.lower() for a in acc.get("allowed_users", [])]
     if not allowed:
-        return False  # fail-closed: no allowlist configured
+        # Empty allowed_users means no restriction (open access)
+        return True
     if caller is None:
         return False  # fail-closed: allowlist present but identity unavailable
     return caller.lower() in allowed
@@ -75,7 +78,8 @@ def assert_account_access(account_id: str, caller: Optional[str]) -> None:
         return
     allowed = [a.lower() for a in acc.get("allowed_users", [])]
     if not allowed:
-        raise PermissionError("Access denied: account requires allowlist configuration")
+        # Empty allowed_users = open access
+        return
     if caller is None:
         raise PermissionError("Access denied: caller identity unavailable")
     if caller.lower() not in allowed:

@@ -1,13 +1,13 @@
 """Tests for access-control enforcement.
 
 Covers:
-  1. Identity resolution (EMAIL_MULTI_CALLER env var and optional params["caller"])
+  1. Identity resolution (EMAIL_MULTI_CALLER env var and params["caller"])
   2. auth.is_account_accessible() — the full allowlist x identity matrix
   3. auth.assert_account_access() — PermissionError messages
   4. Tool handler integration — denied calls return access-denied JSON errors
   5. Filtered multi-account operations (list_accounts, poll_inbox, search)
-  6. Fail-closed: empty allowed_users denies access
-  7. params["caller"] not trusted by default
+  6. Empty allowed_users = open access (no restriction)
+  7. params["caller"] trusted by default
 """
 import json
 import os
@@ -40,7 +40,7 @@ _RESTRICTED = {
     "folders": {"inbox": "INBOX", "sent": "Sent", "drafts": "Drafts", "trash": "Trash"},
 }
 
-# No allowed_users, no allow_all — fail-closed denies access
+# Empty allowed_users, no allow_all — treated as open access
 _NO_ALLOWLIST = {
     "account_id": "no_allowlist",
     "email": "noallow@example.com",
@@ -102,39 +102,39 @@ class TestGetCallerIdentity(unittest.TestCase):
         result = auth.get_caller_identity({})
         self.assertEqual(result, "bob@example.com")
 
-    def test_params_not_trusted_by_default(self):
-        """params["caller"] is ignored unless EMAIL_MULTI_TRUST_CALLER_PARAM=true."""
-        result = auth.get_caller_identity({"caller": "alice@example.com"})
-        self.assertIsNone(result)
-
-    def test_params_trusted_when_env_enabled(self):
-        os.environ["EMAIL_MULTI_TRUST_CALLER_PARAM"] = "true"
+    def test_params_trusted_by_default(self):
+        """params["caller"] is trusted by default (Hermes injects it)."""
         result = auth.get_caller_identity({"caller": "alice@example.com"})
         self.assertEqual(result, "alice@example.com")
 
+    def test_params_not_trusted_when_env_disabled(self):
+        os.environ["EMAIL_MULTI_TRUST_CALLER_PARAM"] = "false"
+        result = auth.get_caller_identity({"caller": "alice@example.com"})
+        self.assertIsNone(result)
+
     def test_env_takes_priority_over_params(self):
         os.environ["EMAIL_MULTI_CALLER"] = "bob@example.com"
-        os.environ["EMAIL_MULTI_TRUST_CALLER_PARAM"] = "true"
         result = auth.get_caller_identity({"caller": "alice@example.com"})
         self.assertEqual(result, "bob@example.com")
 
     def test_no_identity_returns_none(self):
+        os.environ["EMAIL_MULTI_TRUST_CALLER_PARAM"] = "false"
         result = auth.get_caller_identity({})
         self.assertIsNone(result)
 
     def test_empty_string_params_ignored(self):
-        os.environ["EMAIL_MULTI_TRUST_CALLER_PARAM"] = "true"
         result = auth.get_caller_identity({"caller": "   "})
         self.assertIsNone(result)
 
     def test_empty_env_ignored(self):
         os.environ["EMAIL_MULTI_CALLER"] = "   "
+        os.environ["EMAIL_MULTI_TRUST_CALLER_PARAM"] = "false"
         result = auth.get_caller_identity({})
         self.assertIsNone(result)
 
 
 # ---------------------------------------------------------------------------
-# 2. auth.is_account_accessible — allowlist x identity matrix (fail-closed)
+# 2. auth.is_account_accessible — allowlist x identity matrix
 # ---------------------------------------------------------------------------
 
 class TestIsAccountAccessible(unittest.TestCase):
@@ -150,7 +150,6 @@ class TestIsAccountAccessible(unittest.TestCase):
         os.environ.pop("EMAIL_MULTI_TRUST_CALLER_PARAM", None)
 
     def test_allowlisted_user_granted(self):
-        os.environ["EMAIL_MULTI_CALLER"] = "alice@example.com"
         self.assertTrue(auth.is_account_accessible("restricted", "alice@example.com"))
 
     def test_non_allowlisted_user_denied(self):
@@ -165,16 +164,15 @@ class TestIsAccountAccessible(unittest.TestCase):
     def test_no_caller_identity_with_allowlist_denied(self):
         self.assertFalse(auth.is_account_accessible("restricted", None))
 
-    def test_no_allowlist_fail_closed_denies(self):
-        """Empty allowed_users with no allow_all must deny (fail-closed)."""
-        self.assertFalse(auth.is_account_accessible("no_allowlist", "anyone@example.com"))
-        self.assertFalse(auth.is_account_accessible("no_allowlist", None))
+    def test_no_allowlist_open_access(self):
+        """Empty allowed_users with no allow_all is treated as open access."""
+        self.assertTrue(auth.is_account_accessible("no_allowlist", "anyone@example.com"))
+        self.assertTrue(auth.is_account_accessible("no_allowlist", None))
 
     def test_unknown_account_denied(self):
         self.assertFalse(auth.is_account_accessible("nonexistent", "alice@example.com"))
 
     def test_case_insensitive_match(self):
-        os.environ["EMAIL_MULTI_CALLER"] = "ALICE@EXAMPLE.COM"
         self.assertTrue(auth.is_account_accessible("restricted", "ALICE@EXAMPLE.COM"))
 
 
@@ -212,13 +210,9 @@ class TestAssertAccountAccess(unittest.TestCase):
         self.assertIn("Access denied", msg)
         self.assertIn("identity unavailable", msg)
 
-    def test_no_allowlist_raises_generic(self):
-        """Empty allowed_users should deny with a generic message."""
-        with self.assertRaises(PermissionError) as ctx:
-            auth.assert_account_access("no_allowlist", "anyone@example.com")
-        msg = str(ctx.exception)
-        self.assertIn("Access denied", msg)
-        self.assertIn("allowlist", msg)
+    def test_no_allowlist_passes(self):
+        """Empty allowed_users is treated as open access — no exception."""
+        auth.assert_account_access("no_allowlist", "anyone@example.com")
 
     def test_allow_all_no_identity_passes(self):
         auth.assert_account_access("allopen", None)
@@ -285,20 +279,24 @@ class TestToolsAccessDenied(unittest.TestCase):
             {"account_id": "restricted", "message_id": "1"}
         ))
 
-    # params["caller"] not trusted by default
-    def test_params_caller_not_trusted_by_default(self):
-        self._denied(tools.email_multi_list_messages(
+    # params["caller"] trusted by default — authorized caller passes
+    @patch("email_multi.service.search_messages", return_value=[])
+    def test_params_caller_trusted_by_default(self, _):
+        result = json.loads(tools.email_multi_list_messages(
             {"account_id": "restricted", "caller": "alice@example.com"}
         ))
+        self.assertTrue(result.get("success"))
 
     # Wrong caller via env -> denied
     def test_wrong_caller_via_env_denied(self):
         os.environ["EMAIL_MULTI_CALLER"] = "bob@example.com"
         self._denied(tools.email_multi_list_messages({"account_id": "restricted"}))
 
-    # No allowlist account denies everyone
-    def test_no_allowlist_denies_all(self):
-        self._denied(tools.email_multi_list_messages({"account_id": "no_allowlist"}))
+    # No allowlist account is open access
+    @patch("email_multi.service.search_messages", return_value=[])
+    def test_no_allowlist_allows_all(self, _):
+        result = json.loads(tools.email_multi_list_messages({"account_id": "no_allowlist"}))
+        self.assertTrue(result.get("success"))
 
 
 # ---------------------------------------------------------------------------
@@ -330,8 +328,7 @@ class TestToolsAccessAllowed(unittest.TestCase):
         self._ok(tools.email_multi_list_messages({"account_id": "restricted"}))
 
     @patch("email_multi.service.search_messages", return_value=[])
-    def test_valid_caller_in_params_when_trusted(self, _):
-        os.environ["EMAIL_MULTI_TRUST_CALLER_PARAM"] = "true"
+    def test_valid_caller_in_params(self, _):
         result = self._ok(tools.email_multi_list_messages(
             {"account_id": "restricted", "caller": "alice@example.com"}
         ))
@@ -376,11 +373,12 @@ class TestMultiAccountFiltering(unittest.TestCase):
         os.environ.pop("EMAIL_MULTI_TRUST_CALLER_PARAM", None)
 
     @patch("email_multi.service.check_account", return_value={"imap": True, "smtp": True})
-    def test_list_accounts_hides_inaccessible_no_identity(self, _):
+    def test_list_accounts_hides_restricted_no_identity(self, _):
         result = json.loads(tools.email_multi_list_accounts({}))
         ids = [a["account_id"] for a in result["accounts"]]
         self.assertNotIn("restricted", ids, "restricted account must not appear without identity")
-        self.assertNotIn("no_allowlist", ids, "no_allowlist must be denied (fail-closed)")
+        # no_allowlist is open access, so it appears
+        self.assertIn("no_allowlist", ids)
         self.assertIn("allopen", ids)
 
     @patch("email_multi.service.check_account", return_value={"imap": True, "smtp": True})
@@ -389,23 +387,24 @@ class TestMultiAccountFiltering(unittest.TestCase):
         result = json.loads(tools.email_multi_list_accounts({}))
         ids = [a["account_id"] for a in result["accounts"]]
         self.assertIn("restricted", ids)
-        self.assertNotIn("no_allowlist", ids)
+        self.assertIn("no_allowlist", ids)
         self.assertIn("allopen", ids)
 
     @patch("email_multi.service.search_messages", return_value=[])
-    def test_poll_inbox_skips_inaccessible_no_identity(self, mock_search):
+    def test_poll_inbox_skips_restricted_no_identity(self, mock_search):
         tools.email_multi_poll_inbox({})
         called_ids = {call.kwargs.get("account_id") for call in mock_search.call_args_list}
         self.assertNotIn("restricted", called_ids)
-        self.assertNotIn("no_allowlist", called_ids)
+        # no_allowlist is open, so it's included
+        self.assertIn("no_allowlist", called_ids)
         self.assertIn("allopen", called_ids)
 
     @patch("email_multi.service.search_full_messages", return_value=[])
-    def test_search_messages_skips_inaccessible_no_identity(self, mock_search):
+    def test_search_messages_skips_restricted_no_identity(self, mock_search):
         json.loads(tools.email_multi_search_messages({}))
         called_ids = {call.kwargs.get("account_id") for call in mock_search.call_args_list}
         self.assertNotIn("restricted", called_ids)
-        self.assertNotIn("no_allowlist", called_ids)
+        self.assertIn("no_allowlist", called_ids)
 
     @patch("email_multi.service.search_full_messages", return_value=[])
     def test_search_messages_explicit_account_denied(self, _):

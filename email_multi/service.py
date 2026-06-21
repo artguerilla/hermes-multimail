@@ -56,7 +56,7 @@ def _send_imap_id(imap: imaplib.IMAP4) -> None:
     try:
         imap.xatom(
             "ID",
-            '("name" "hermes-multimail" "version" "1.0.0")',
+            '("name" "hermes-multimail" "version" "1.0.2")',
         )
     except Exception:
         pass

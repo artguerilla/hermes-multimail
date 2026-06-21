@@ -236,7 +236,7 @@ def email_multi_search_messages(params: dict, **kwargs) -> str:
 
 
 def email_multi_search(params: dict, **kwargs) -> str:
-    return email_multi_search_messages(params)
+    return email_multi_search_messages(params, **kwargs)
 
 
 def email_multi_read(params: dict, **kwargs) -> str:

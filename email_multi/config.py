@@ -28,6 +28,7 @@ Security:
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -35,6 +36,21 @@ import yaml
 
 ACCOUNTS_ENV = "EMAIL_MULTI_ACCOUNTS"
 HERMES_HOME_ENV = "HERMES_HOME"
+
+_accounts_cache: Optional[List[Dict[str, Any]]] = None
+_accounts_cache_time: float = 0
+_ACCOUNTS_CACHE_TTL = 60  # seconds
+
+
+def _clear_accounts_cache() -> None:
+    global _accounts_cache, _accounts_cache_time
+    _accounts_cache = None
+    _accounts_cache_time = 0
+
+
+def _plugin_dir() -> Path:
+    """Return this plugin's own directory."""
+    return Path(__file__).resolve().parent
 
 
 def hermes_home() -> Path:
@@ -47,26 +63,40 @@ def hermes_home() -> Path:
 
 
 def load_accounts() -> List[Dict[str, Any]]:
-    """Load account configs from YAML file or env var."""
-    accounts_yaml = hermes_home() / "plugins" / "email_multi" / "accounts.yaml"
+    """Load account configs from YAML file or env var (cached up to TTL)."""
+    global _accounts_cache, _accounts_cache_time
+    now = time.time()
+    if _accounts_cache is not None and (now - _accounts_cache_time) < _ACCOUNTS_CACHE_TTL:
+        return _accounts_cache
+
+    accounts_yaml = _plugin_dir() / "accounts.yaml"
     # Try YAML file first
     if accounts_yaml.exists():
         with open(accounts_yaml) as f:
             data = yaml.safe_load(f)
         if isinstance(data, dict) and "accounts" in data:
-            return _resolve_accounts(data["accounts"])
+            result = _resolve_accounts(data["accounts"])
+            _accounts_cache, _accounts_cache_time = result, time.time()
+            return result
         if isinstance(data, list):
-            return _resolve_accounts(data)
+            result = _resolve_accounts(data)
+            _accounts_cache, _accounts_cache_time = result, time.time()
+            return result
 
     # Fall back to env var (JSON)
     raw = os.getenv(ACCOUNTS_ENV, "")
     if raw.strip():
         data = json.loads(raw)
         if isinstance(data, list):
-            return _resolve_accounts(data)
+            result = _resolve_accounts(data)
+            _accounts_cache, _accounts_cache_time = result, time.time()
+            return result
         if isinstance(data, dict) and "accounts" in data:
-            return _resolve_accounts(data["accounts"])
+            result = _resolve_accounts(data["accounts"])
+            _accounts_cache, _accounts_cache_time = result, time.time()
+            return result
 
+    _accounts_cache, _accounts_cache_time = [], time.time()
     return []
 
 

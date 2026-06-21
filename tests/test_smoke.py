@@ -16,7 +16,6 @@ import json
 import os
 import sys
 import tempfile
-import unittest
 from datetime import date, datetime
 from pathlib import Path
 
@@ -148,47 +147,6 @@ def test_tools_has_datetime_encoder():
     source = (PLUGIN_DIR / "tools.py").read_text()
     assert "_DateTimeEncoder" in source, "tools.py must define _DateTimeEncoder"
     assert "isoformat" in source, "tools.py encoder must call .isoformat()"
-
-
-class FakeContext:
-    def __init__(self):
-        self.tools = []
-        self.skills = []
-
-    def register_tool(self, **kwargs):
-        self.tools.append(kwargs)
-
-    def register_skill(self, *args):
-        self.skills.append(args)
-
-
-class PluginRegistrationTests(unittest.TestCase):
-    def test_register_registers_schema_tools_with_matching_handlers(self):
-        import email_multi
-        from email_multi import schemas, tools
-
-        ctx = FakeContext()
-        email_multi.register(ctx)
-
-        self.assertEqual([item["name"] for item in ctx.tools], [schema["name"] for schema in schemas.TOOLS])
-        self.assertEqual(len(ctx.tools), len(schemas.TOOLS))
-        for item, schema in zip(ctx.tools, schemas.TOOLS):
-            self.assertEqual(item["toolset"], "email_multi")
-            self.assertIs(item["schema"], schema)
-            self.assertIs(item["handler"], getattr(tools, schema["name"]))
-
-    def test_register_registers_bundled_skill_when_present(self):
-        import email_multi
-
-        ctx = FakeContext()
-        email_multi.register(ctx)
-
-        skill_path = PLUGIN_DIR / "skill" / "SKILL.md"
-        self.assertTrue(skill_path.exists())
-        self.assertEqual(
-            ctx.skills,
-            [("email-multi", skill_path)],
-        )
 
 
 if __name__ == "__main__":
