@@ -1,20 +1,80 @@
-# hermes-multimail
+<p align="center">
+  <img src=".github/assets/hermes-multimail-header.png" alt="hermes-multimail — One Hermes plugin. Many inboxes. Less chaos." width="100%">
+</p>
 
-**Multi-account IMAP/SMTP email adapter for [Hermes Agent](https://github.com/NousResearch/hermes-agent).**
+<h1 align="center">hermes-multimail</h1>
 
-Drops into any `~/.hermes/plugins/` directory with no core Hermes modifications.
+<p align="center">
+  <strong>One Hermes plugin. Many inboxes. Less chaos.</strong>
+</p>
 
-## Features
+<p align="center">
+  Multi-account IMAP/SMTP for Hermes Agent — search, read, send, reply, and handle attachments without patching Hermes core.
+</p>
 
-- **Multi-account** — manage multiple IMAP/SMTP accounts from a single config
-- **Attachment handling** — extract, cache and download attachments locally
-- **HTML → text** — automatic fallback for HTML-only emails
-- **Thread-safe replies** — `In-Reply-To` and `References` headers out of the box
-- **Access control** — per-account allowlists (`allowed_users` / `allow_all`)
-- **Skip attachments** — optional `skip_attachments` flag for security/bandwidth
-- **Small dependency surface** — IMAP/SMTP use the Python standard library; YAML config loading requires `PyYAML`
+<p align="center">
+  <a href="#why-this-exists">Why</a>
+  ·
+  <a href="#installation">Install</a>
+  ·
+  <a href="#configuration">Configure</a>
+  ·
+  <a href="#access-control">Security Model</a>
+  ·
+  <a href="#tools">Tools</a>
+  ·
+  <a href="#contributing">Contribute</a>
+</p>
+
+<p align="center">
+  <img alt="Python" src="https://img.shields.io/badge/python-3.9%2B-blue">
+  <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
+  <img alt="Hermes Plugin" src="https://img.shields.io/badge/Hermes-plugin-purple">
+  <img alt="Security" src="https://img.shields.io/badge/security-fail--closed-orange">
+</p>
+
+<p align="center">
+  <em>Built by artguerilla for agents who keep asking: “wait… which inbox was that again?”</em>
+</p>
+
+---
+
+## Why this exists
+
+Hermes has a clean plugin system, but real inbox workflows get messy fast: multiple accounts, different providers, attachments, replies, and agents that need to know exactly which mailbox they are touching.
+
+`hermes-multimail` keeps that boring and reliable.
+
+No Hermes core patches.  
+No private orchestration setup.  
+No magic account guessing.  
+
+Just standard IMAP/SMTP wrapped in safe, explicit tools with fail-closed access control.
+
+## What it does
+
+- **Multi-account mail** — manage several IMAP/SMTP accounts from one config
+- **Search and read** — list, search, and read messages across accessible accounts
+- **Send and reply** — send new emails or reply in-thread with proper headers
+- **Attachment handling** — inspect and optionally download attachments
+- **HTML to text** — fallback text extraction for HTML-only emails
+- **Fail-closed access** — deny access unless identity/allowlist rules are satisfied
+- **No plaintext passwords** — credentials must come from environment variables
+- **Small dependency surface** — IMAP/SMTP use Python standard library; YAML loading uses `PyYAML`
+
+## Example workflow
+
+1. Ask Hermes to list available mailboxes.
+2. Search all accessible inboxes for an invoice.
+3. Read the matching email from the correct account.
+4. Download the attachment only when needed.
+5. Reply from the mailbox that received the original thread.
+
+No account guessing. No core patching. No “oops, wrong inbox.”
 
 ## Installation
+
+### Option A: Drop-in directory
 
 ```bash
 git clone https://github.com/artguerilla/hermes-multimail.git
@@ -22,26 +82,36 @@ mkdir -p ~/.hermes/plugins
 cp -R hermes-multimail/email_multi ~/.hermes/plugins/email_multi
 ```
 
-Then enable `email_multi` in `~/.hermes/config.yaml`.
-
-### HERMES_HOME
-
-By default the plugin reads config from `~/.hermes/plugins/email_multi/accounts.yaml`
-and caches attachments under `~/.hermes/cache/email_multi/`.
-
-Set `HERMES_HOME` to use a different base directory (useful for multiple profiles or
-sandboxed testing):
+### Option B: pip install
 
 ```bash
-export HERMES_HOME=/path/to/custom-hermes-home
+pip install hermes-multimail
 ```
 
-Both the accounts config path and the attachment cache path are resolved relative to
-`HERMES_HOME` at call time, so changing it mid-session takes effect immediately.
+### Enable the plugin
+
+In `~/.hermes/config.yaml`:
+
+```yaml
+plugins:
+  enabled:
+    - email-multi
+```
+
+Then restart Hermes.
+
+## Naming
+
+The plugin uses **hyphens** for the Hermes plugin name and **underscores** for Python/tool names:
+
+| Context | Name |
+|---|---|
+| `plugins.enabled` in config | `email-multi` |
+| Python package | `email_multi` |
+| Tool names | `email_multi_list_accounts`, etc. |
+| Skill name | `email-multi` |
 
 ## Configuration
-
-### 1. Accounts
 
 Create `~/.hermes/plugins/email_multi/accounts.yaml`:
 
@@ -50,12 +120,13 @@ accounts:
   - account_id: gmail
     email: user@gmail.com
     display_name: Gmail
-    password_env: EMAIL_GMAIL_PASSWORD  # resolved from .env
+    password_env: EMAIL_GMAIL_PASSWORD
     imap_host: imap.gmail.com
     imap_port: 993
     smtp_host: smtp.gmail.com
     smtp_port: 587
-    allowed_users: []
+    allowed_users:
+      - user@gmail.com
     allow_all: false
     skip_attachments: false
     folders:
@@ -63,75 +134,79 @@ accounts:
       sent: "[Gmail]/Sent Mail"
       drafts: "[Gmail]/Drafts"
       trash: "[Gmail]/Trash"
-  - account_id: company
-    email: user@company.com
-    display_name: Work
-    password_env: EMAIL_COMPANY_PASSWORD
-    imap_host: imap.company.com
-    imap_port: 993
-    smtp_host: smtp.company.com
-    smtp_port: 587
-    allowed_users: []
-    allow_all: false
-    skip_attachments: false
-    folders:
-      inbox: INBOX
-      sent: Sent
-      drafts: Drafts
-      trash: Trash
 ```
 
-### 2. Environment Variables
+See `accounts.example.yaml` for a fuller reference.
 
-Add to `~/.hermes/.env`:
+## Environment variables
+
+Store secrets in the environment Hermes loads, commonly `~/.hermes/.env`:
 
 ```bash
+# Email passwords
 EMAIL_GMAIL_PASSWORD=your_app_password
-EMAIL_COMPANY_PASSWORD=your_app_password
+
+# Trusted caller identity for access control
+EMAIL_MULTI_CALLER=user@gmail.com
+
+# Optional: trust params["caller"] from Hermes gateway tool calls
+# EMAIL_MULTI_TRUST_CALLER_PARAM=true
+
+# Optional: custom Hermes home
+# HERMES_HOME=/path/to/custom-hermes-home
 ```
 
-Restrict permissions:
+Restrict local env permissions:
+
 ```bash
 chmod 600 ~/.hermes/.env
 ```
 
-### 3. Enable Plugin
+See `.env.example` for all supported variables.
 
-In `~/.hermes/config.yaml`:
+## Access Control
 
-```yaml
-plugins:
-  enabled:
-    - email_multi
-```
+`hermes-multimail` uses a **fail-closed** access model.
 
-Then restart Hermes:
-```bash
-hermes gateway restart
-```
+A mail account is accessible only when one of these conditions is true:
+
+- `allow_all: true` is set for that account
+- `EMAIL_MULTI_CALLER` is set and matches one of the account’s `allowed_users`
+- `EMAIL_MULTI_TRUST_CALLER_PARAM=true` is set and the runtime injects a verified `params["caller"]`
+
+By default, `params["caller"]` is **not trusted**, because model/tool-call parameters may be manipulated in some deployments.
+
+If an account has neither `allowed_users` nor `allow_all`, access is denied.
+
+## Security
+
+- **No plaintext passwords** — the `password` field in account config is rejected
+- **Use `password_env`** — credentials must be referenced through environment variables
+- **Fail-closed access** — missing identity or missing allowlist denies access
+- **No allowlist leakage** — denial errors do not expose configured allowlists
+- **Attachment control** — use `skip_attachments: true` to disable attachment downloads
+- **Dedicated accounts recommended** — avoid connecting personal inboxes directly
+- **App passwords recommended** — especially for Gmail with 2FA
+
+See `SECURITY.md` for the full security model.
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `email_multi_list_accounts` | List all configured accounts with status |
-| `email_multi_poll_inbox` | Poll for new unseen emails across all accounts |
+| `email_multi_list_accounts` | List accessible configured accounts with status |
+| `email_multi_poll_inbox` | Poll for new unseen emails across accessible accounts |
 | `email_multi_list_messages` | List messages from a folder with IMAP criteria |
-| `email_multi_search_messages` | Search across accounts (subject, from, dates, keyword, attachments) |
+| `email_multi_search_messages` | Search across accounts by subject, sender, date, keyword, or attachment presence |
 | `email_multi_read` | Read a message with optional attachment download |
 | `email_multi_download_attachment` | Download a specific attachment from a message |
-| `email_multi_send` | Send email (plain text, HTML, attachments, CC/BCC) |
-| `email_multi_reply` | Reply in-thread (In-Reply-To / References) |
+| `email_multi_send` | Send email with plain text, HTML, attachments, CC, and BCC |
+| `email_multi_reply` | Reply in-thread with `In-Reply-To` and `References` headers |
 | `email_multi_list_folders` | List IMAP folders for an account |
 | `email_multi_mark_seen` | Mark a message as read |
-| `email_multi_delete_message` | Delete/move to trash |
+| `email_multi_delete_message` | Move/delete a message via the configured trash behavior |
 
-Hermes registers these 11 tools from `email_multi/schemas.py`. The implementation
-also keeps an internal compatibility handler named `email_multi_search`, but that
-alias is not registered as a separate exported Hermes tool. Use
-`email_multi_search_messages` for search calls.
-
-### Search Filters
+### Search filters
 
 ```json
 {
@@ -146,24 +221,42 @@ alias is not registered as a separate exported Hermes tool. Use
 }
 ```
 
-`keyword` is sent to IMAP as a portable `TEXT` search for ASCII keywords, so the
-server narrows candidates before full messages are fetched. Results are still
-checked client-side against decoded subject, sender, and text body. If the
-server rejects the `TEXT` search, or if the keyword is non-ASCII, the tool falls
-back to the non-keyword IMAP criteria and applies the decoded keyword filter
-locally.
+`keyword` uses portable IMAP `TEXT` search for ASCII keywords when possible. Results are still checked client-side against decoded subject, sender, and text body. Non-ASCII keywords fall back to client-side filtering.
 
-Search results are fetched over a single IMAP session per account and use
-multi-UID fetch batches for headers and full messages. If a server rejects a
-batched UID fetch, the same session retries those UIDs individually.
+## Testing
 
-## Security
+```bash
+# Syntax check
+python3 -m py_compile email_multi/*.py
 
-- **Dedicated mail accounts** — use purpose-built email addresses, not personal inboxes
-- **App passwords** — use app-specific passwords instead of main credentials (especially Gmail with 2FA)
-- **No plaintext secrets** — passwords resolved from environment variables only
-- **Access control** — `allowed_users` and `allow_all` per account
-- **Skip attachments** — `skip_attachments: true` disables attachment downloads
+# Run all tests
+python3 -m unittest
+
+# Lint
+ruff check email_multi tests
+
+# Build and package check
+python -m build
+twine check dist/*
+```
+
+## CI and branch flow
+
+This repo uses:
+
+```txt
+feature/* → dev → main
+```
+
+Dependabot targets `dev`, and release/promotion happens through a `dev → main` PR.
+
+## Contributing
+
+Contributions are welcome.
+
+Keep PRs focused, update docs for user-facing changes, and run the verification suite before opening a PR.
+
+See `CONTRIBUTING.md` for details.
 
 ## License
 
@@ -171,5 +264,4 @@ MIT
 
 ## Upstream
 
-Built on top of [Hermes Agent](https://github.com/NousResearch/hermes-agent) plugin architecture.
-Mirrors Hermes gateway `EmailAdapter` behavior (IMAP/SMTP, polling, threading, HTML→text).
+Built on top of the Hermes Agent plugin architecture.
