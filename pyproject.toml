@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-multimail"
-version = "1.0.1"
+version = "1.0.2"
 description = "Multi-account IMAP/SMTP email plugin for Hermes Agent"
 readme = "README.md"
 license = {text = "MIT"}

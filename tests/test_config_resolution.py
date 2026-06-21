@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -19,11 +20,14 @@ class ConfigResolutionTests(unittest.TestCase):
         self._old_hermes_home = os.environ.pop(config.HERMES_HOME_ENV, None)
         self._old_accounts = os.environ.pop(config.ACCOUNTS_ENV, None)
         self._old_password = os.environ.pop("TEST_EMAIL_PASSWORD", None)
+        # Clear cache so each test gets fresh data
+        config._clear_accounts_cache()
         self.tmp = tempfile.TemporaryDirectory()
         os.environ[config.HERMES_HOME_ENV] = self.tmp.name
 
     def tearDown(self):
         self.tmp.cleanup()
+        config._clear_accounts_cache()
         os.environ.pop(config.HERMES_HOME_ENV, None)
         os.environ.pop(config.ACCOUNTS_ENV, None)
         os.environ.pop("TEST_EMAIL_PASSWORD", None)
@@ -34,13 +38,18 @@ class ConfigResolutionTests(unittest.TestCase):
         if self._old_password is not None:
             os.environ["TEST_EMAIL_PASSWORD"] = self._old_password
 
+    def _plugin_dir_patch(self):
+        """Return a patch that makes _plugin_dir() point to the test temp dir."""
+        return patch.object(config, "_plugin_dir", return_value=Path(self.tmp.name))
+
     def _write_accounts_yaml(self, text):
-        path = Path(self.tmp.name) / "plugins" / "email_multi" / "accounts.yaml"
-        path.parent.mkdir(parents=True)
+        path = Path(self.tmp.name) / "accounts.yaml"
         path.write_text(text)
 
-    def test_load_accounts_from_yaml_accounts_list_and_resolves_password_env(self):
+    @patch.object(config, "_plugin_dir")
+    def test_load_accounts_from_yaml_accounts_list_and_resolves_password_env(self, mock_dir):
         os.environ["TEST_EMAIL_PASSWORD"] = "secret-value"
+        mock_dir.return_value = Path(self.tmp.name)
         self._write_accounts_yaml(
             """
 accounts:
@@ -59,7 +68,9 @@ accounts:
         self.assertEqual(accounts[0]["password"], "secret-value")
         self.assertNotIn("password_env", accounts[0])
 
-    def test_plaintext_password_rejected(self):
+    @patch.object(config, "_plugin_dir")
+    def test_plaintext_password_rejected(self, mock_dir):
+        mock_dir.return_value = Path(self.tmp.name)
         self._write_accounts_yaml(
             """
 accounts:
@@ -76,7 +87,9 @@ accounts:
         self.assertIn("Plaintext", str(ctx.exception))
         self.assertIn("password_env", str(ctx.exception))
 
-    def test_missing_password_env_rejected(self):
+    @patch.object(config, "_plugin_dir")
+    def test_missing_password_env_rejected(self, mock_dir):
+        mock_dir.return_value = Path(self.tmp.name)
         self._write_accounts_yaml(
             """
 accounts:
@@ -91,7 +104,9 @@ accounts:
             config.load_accounts()
         self.assertIn("password_env", str(ctx.exception))
 
-    def test_empty_password_env_var_rejected(self):
+    @patch.object(config, "_plugin_dir")
+    def test_empty_password_env_var_rejected(self, mock_dir):
+        mock_dir.return_value = Path(self.tmp.name)
         self._write_accounts_yaml(
             """
 accounts:
@@ -107,7 +122,10 @@ accounts:
             config.load_accounts()
         self.assertIn("UNSET_VAR_XYZ", str(ctx.exception))
 
-    def test_load_accounts_from_json_env_when_yaml_absent(self):
+    @patch.object(config, "_plugin_dir")
+    def test_load_accounts_from_json_env_when_yaml_absent(self, mock_dir):
+        """ACCOUNTS_ENV JSON is used when no YAML file exists at plugin dir."""
+        mock_dir.return_value = Path("/nonexistent-test-path")
         os.environ[config.ACCOUNTS_ENV] = json.dumps(
             {
                 "accounts": [
@@ -127,7 +145,9 @@ accounts:
 
         self.assertEqual([account["account_id"] for account in accounts], ["personal"])
 
-    def test_defaults_are_applied_to_minimal_account(self):
+    @patch.object(config, "_plugin_dir")
+    def test_defaults_are_applied_to_minimal_account(self, mock_dir):
+        mock_dir.return_value = Path("/nonexistent-test-path")
         os.environ["TEST_EMAIL_PASSWORD"] = "secret-value"
         os.environ[config.ACCOUNTS_ENV] = json.dumps(
             [
@@ -159,7 +179,9 @@ accounts:
             },
         )
 
-    def test_explicit_defaults_are_preserved(self):
+    @patch.object(config, "_plugin_dir")
+    def test_explicit_defaults_are_preserved(self, mock_dir):
+        mock_dir.return_value = Path("/nonexistent-test-path")
         os.environ["TEST_EMAIL_PASSWORD"] = "secret-value"
         os.environ[config.ACCOUNTS_ENV] = json.dumps(
             [
@@ -193,7 +215,9 @@ accounts:
         self.assertEqual(account["folders"]["sent"], "Sent")
         self.assertEqual(account["folders"]["drafts"], "Drafts")
 
-    def test_get_account_and_list_account_ids_return_stable_ids(self):
+    @patch.object(config, "_plugin_dir")
+    def test_get_account_and_list_account_ids_return_stable_ids(self, mock_dir):
+        mock_dir.return_value = Path("/nonexistent-test-path")
         os.environ["TEST_EMAIL_PASSWORD"] = "secret-value"
         os.environ[config.ACCOUNTS_ENV] = json.dumps(
             [
@@ -205,6 +229,48 @@ accounts:
         self.assertEqual(config.list_account_ids(), ["first", "second"])
         self.assertEqual(config.get_account("second")["email"], "second@example.com")
         self.assertIsNone(config.get_account("missing"))
+
+    @patch.object(config, "_plugin_dir")
+    def test_cache_returns_same_data(self, mock_dir):
+        """load_accounts() should cache results within TTL."""
+        os.environ["TEST_EMAIL_PASSWORD"] = "secret-value"
+        mock_dir.return_value = Path(self.tmp.name)
+        self._write_accounts_yaml(
+            """
+accounts:
+  - account_id: cached
+    email: cached@example.com
+    imap_host: imap.example.com
+    smtp_host: smtp.example.com
+    password_env: TEST_EMAIL_PASSWORD
+"""
+        )
+
+        accounts1 = config.load_accounts()
+        accounts2 = config.load_accounts()
+        self.assertIs(accounts1, accounts2, "cache should return same object")
+
+    @patch.object(config, "_plugin_dir")
+    def test_cache_expires_after_ttl(self, mock_dir):
+        """Cache should expire after TTL."""
+        os.environ["TEST_EMAIL_PASSWORD"] = "secret-value"
+        mock_dir.return_value = Path(self.tmp.name)
+        self._write_accounts_yaml(
+            """
+accounts:
+  - account_id: cached
+    email: cached@example.com
+    imap_host: imap.example.com
+    smtp_host: smtp.example.com
+    password_env: TEST_EMAIL_PASSWORD
+"""
+        )
+
+        accounts1 = config.load_accounts()
+        # Force cache expiry
+        config._accounts_cache_time -= config._ACCOUNTS_CACHE_TTL + 1
+        accounts2 = config.load_accounts()
+        self.assertEqual(accounts1[0]["account_id"], accounts2[0]["account_id"])
 
 
 if __name__ == "__main__":
