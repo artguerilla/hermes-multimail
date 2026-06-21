@@ -14,10 +14,10 @@ import ssl
 import uuid
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.utils import formatdate, parseaddr
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Union
+from email.utils import formatdate
+from typing import Any, Dict, List, Optional, Union
 
+from .attachments import extract_attachments
 from .config import get_account
 from .parsing import (
     decode_header_value,
@@ -25,10 +25,8 @@ from .parsing import (
     extract_html_body,
     extract_message_headers,
     extract_text_body,
-    is_automated_sender,
     parse_address_list,
 )
-from .attachments import extract_attachments
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +56,7 @@ def _send_imap_id(imap: imaplib.IMAP4) -> None:
     try:
         imap.xatom(
             "ID",
-            '("name" "hermes-email-multi" "version" "1.0.0" '
-            '"vendor" "frankieandfriends")',
+            '("name" "hermes-multimail" "version" "1.0.1")',
         )
     except Exception:
         pass
@@ -642,9 +639,14 @@ def delete_message(account_id: str, message_uid: str, folder: Optional[str] = No
     """Move message to trash."""
     acc = get_account(account_id)
     folder = folder or acc["folders"]["inbox"]
+    trash_folder = acc.get("folders", {}).get("trash", "Trash")
     imap = _get_imap(acc)
     try:
         imap.select(folder)
+        if folder != trash_folder:
+            status, _ = imap.uid("copy", message_uid, trash_folder)
+            if status != "OK":
+                return False
         status, _ = imap.uid("store", message_uid, "+FLAGS", "\\Deleted")
         if status == "OK":
             imap.expunge()
@@ -694,6 +696,6 @@ def check_allowed(account_id: str, sender_addr: str) -> bool:
         return True
     allowed = [a.lower() for a in acc.get("allowed_users", [])]
     if not allowed:
-        # Match Hermes' practical default: if no allow-list is configured, don't block local/operator use.
-        return True
+        # No allowlist configured — fail closed for security
+        return False
     return sender_addr.lower() in allowed

@@ -1,4 +1,4 @@
-"""Tool handlers for email_multi plugin.
+"""Tool handlers for email-multi plugin.
 
 Thin wrapper around config/service/parsing/attachments modules.
 """
@@ -10,7 +10,8 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import attachments, config, service
+from . import attachments, auth, config, service
+
 
 def _attachment_cache_dir() -> Path:
     """Return the attachment cache dir under the active Hermes home."""
@@ -125,9 +126,12 @@ def _filter_messages(messages: List[Dict[str, Any]], params: dict) -> List[Dict[
     return filtered
 
 
-def email_multi_list_accounts(params: dict) -> str:
+def email_multi_list_accounts(params: dict, **kwargs) -> str:
+    caller = auth.get_caller_identity(params)
     accounts = []
     for acc in config.load_accounts():
+        if not auth.is_account_accessible(acc["account_id"], caller):
+            continue
         health = service.check_account(acc["account_id"])
         accounts.append({
             "account_id": acc["account_id"],
@@ -143,8 +147,10 @@ def email_multi_list_accounts(params: dict) -> str:
     return _ok(success=True, count=len(accounts), accounts=accounts)
 
 
-def email_multi_poll_inbox(params: dict) -> str:
+def email_multi_poll_inbox(params: dict, **kwargs) -> str:
+    caller = auth.get_caller_identity(params)
     account_ids = [params["account_id"]] if params.get("account_id") else config.list_account_ids()
+    account_ids = [aid for aid in account_ids if auth.is_account_accessible(aid, caller)]
     limit = int(params.get("limit", 20))
     messages: List[Dict[str, Any]] = []
     errors: List[Dict[str, Any]] = []
@@ -161,9 +167,10 @@ def email_multi_poll_inbox(params: dict) -> str:
     return _ok(success=True, count=len(messages), messages=messages, errors=errors)
 
 
-def email_multi_list_messages(params: dict) -> str:
+def email_multi_list_messages(params: dict, **kwargs) -> str:
     try:
         account_id = params["account_id"]
+        auth.assert_account_access(account_id, auth.get_caller_identity(params))
         folder = params.get("folder")
         criteria = _build_imap_criteria(params)
         fallback_criteria = _build_imap_criteria(params, include_keyword=False) if params.get("keyword") else None
@@ -182,8 +189,21 @@ def email_multi_list_messages(params: dict) -> str:
         return _err(str(e))
 
 
-def email_multi_search_messages(params: dict) -> str:
-    account_ids = [params["account_id"]] if params.get("account_id") else config.list_account_ids()
+def email_multi_search_messages(params: dict, **kwargs) -> str:
+    caller = auth.get_caller_identity(params)
+    if params.get("account_id"):
+        # Single explicit account: enforce strictly
+        try:
+            auth.assert_account_access(params["account_id"], caller)
+        except PermissionError as e:
+            return _err(str(e))
+        account_ids = [params["account_id"]]
+    else:
+        # All accounts: silently skip inaccessible ones
+        account_ids = [
+            aid for aid in config.list_account_ids()
+            if auth.is_account_accessible(aid, caller)
+        ]
     limit = int(params.get("limit", 50))
     folder = params.get("folder")
     criteria = _build_imap_criteria(params)
@@ -215,13 +235,14 @@ def email_multi_search_messages(params: dict) -> str:
     return _ok(success=True, count=len(results), messages=results[:limit], errors=errors)
 
 
-def email_multi_search(params: dict) -> str:
-    return email_multi_search_messages(params)
+def email_multi_search(params: dict, **kwargs) -> str:
+    return email_multi_search_messages(params, **kwargs)
 
 
-def email_multi_read(params: dict) -> str:
+def email_multi_read(params: dict, **kwargs) -> str:
     try:
         account_id = params["account_id"]
+        auth.assert_account_access(account_id, auth.get_caller_identity(params))
         message_id = params["message_id"]
         folder = params.get("folder")
         include_html = bool(params.get("include_html", False))
@@ -244,9 +265,10 @@ def email_multi_read(params: dict) -> str:
         return _err(str(e), account_id=params.get("account_id"), message_id=params.get("message_id"))
 
 
-def email_multi_download_attachment(params: dict) -> str:
+def email_multi_download_attachment(params: dict, **kwargs) -> str:
     try:
         account_id = params["account_id"]
+        auth.assert_account_access(account_id, auth.get_caller_identity(params))
         message_id = params["message_id"]
         attachment_id = str(params["attachment_id"])
         folder = params.get("folder")
@@ -284,8 +306,9 @@ def email_multi_download_attachment(params: dict) -> str:
         return _err(str(e), account_id=params.get("account_id"), message_id=params.get("message_id"))
 
 
-def email_multi_send(params: dict) -> str:
+def email_multi_send(params: dict, **kwargs) -> str:
     try:
+        auth.assert_account_access(params["account_id"], auth.get_caller_identity(params))
         attachments_list = _normalize_attachments(params.get("attachments"))
         msg_id = service.send_email(
             account_id=params["account_id"],
@@ -302,8 +325,9 @@ def email_multi_send(params: dict) -> str:
         return _err(str(e), account_id=params.get("account_id"))
 
 
-def email_multi_reply(params: dict) -> str:
+def email_multi_reply(params: dict, **kwargs) -> str:
     try:
+        auth.assert_account_access(params["account_id"], auth.get_caller_identity(params))
         attachments_list = _normalize_attachments(params.get("attachments"))
         msg_id = service.reply_email(
             account_id=params["account_id"],
@@ -319,24 +343,27 @@ def email_multi_reply(params: dict) -> str:
         return _err(str(e), account_id=params.get("account_id"), message_id=params.get("message_id"))
 
 
-def email_multi_list_folders(params: dict) -> str:
+def email_multi_list_folders(params: dict, **kwargs) -> str:
     try:
+        auth.assert_account_access(params["account_id"], auth.get_caller_identity(params))
         folders = service.list_folders(params["account_id"])
         return _ok(success=True, account_id=params["account_id"], count=len(folders), folders=folders)
     except Exception as e:
         return _err(str(e), account_id=params.get("account_id"))
 
 
-def email_multi_mark_seen(params: dict) -> str:
+def email_multi_mark_seen(params: dict, **kwargs) -> str:
     try:
+        auth.assert_account_access(params["account_id"], auth.get_caller_identity(params))
         ok = service.mark_seen(params["account_id"], params["message_id"], params.get("folder"))
         return _ok(success=ok, account_id=params["account_id"], message_id=params["message_id"], marked_seen=ok)
     except Exception as e:
         return _err(str(e), account_id=params.get("account_id"), message_id=params.get("message_id"))
 
 
-def email_multi_delete_message(params: dict) -> str:
+def email_multi_delete_message(params: dict, **kwargs) -> str:
     try:
+        auth.assert_account_access(params["account_id"], auth.get_caller_identity(params))
         ok = service.delete_message(params["account_id"], params["message_id"], params.get("folder"))
         return _ok(success=ok, account_id=params["account_id"], message_id=params["message_id"], deleted=ok)
     except Exception as e:

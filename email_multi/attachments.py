@@ -7,16 +7,13 @@ Mirrors Hermes gateway adapter attachment behavior:
 """
 
 import mimetypes
-import os
-from email import encoders
+from email.header import decode_header
+from email.mime.application import MIMEApplication
+from email.mime.audio import MIMEAudio
 from email.mime.base import MIMEBase
 from email.mime.image import MIMEImage
-from email.mime.audio import MIMEAudio
-from email.mime.application import MIMEApplication
-from email.header import decode_header
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
-
+from typing import Any, Dict, List, Optional
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".bmp", ".tiff"}
 _AUDIO_EXTS = {".mp3", ".ogg", ".wav", ".m4a", ".aac", ".flac"}
@@ -110,7 +107,12 @@ def extract_attachments(
 
 
 def create_attachment_part(file_path: str, filename: Optional[str] = None) -> MIMEBase:
-    """Create a MIME attachment part from a local file."""
+    """Create a MIME attachment part from a local file.
+
+    Uses RFC 2231 encoding for non-ASCII filenames.
+    """
+    from email.utils import encode_rfc2231
+
     p = Path(file_path)
     fname = filename or p.name
     content_type, encoding = mimetypes.guess_type(str(p))
@@ -131,7 +133,12 @@ def create_attachment_part(file_path: str, filename: Optional[str] = None) -> MI
     else:
         part = MIMEApplication(data, _subtype=sub_type)
 
-    part.add_header("Content-Disposition", f"attachment; filename={fname}")
+    # Use RFC 2231 encoding for non-ASCII filenames
+    if not fname.isascii():
+        encoded = encode_rfc2231(fname, "utf-8")
+        part.add_header("Content-Disposition", "attachment", filename=encoded)
+    else:
+        part.add_header("Content-Disposition", f"attachment; filename={fname}")
     return part
 
 
