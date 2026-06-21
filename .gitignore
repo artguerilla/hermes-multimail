@@ -14,6 +14,9 @@ build/
 .env.local
 .env.*.local
 
+# Runtime configuration (never commit real mailbox config)
+email_multi/accounts.yaml
+
 # OS
 .DS_Store
 Thumbs.db
