@@ -138,6 +138,7 @@ def _resolve_accounts(accounts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         resolved_acc.setdefault("allow_all", False)
         resolved_acc.setdefault("skip_attachments", False)
         resolved_acc.setdefault("poll_interval", 15)
+        resolved_acc.setdefault("auth_failure_cooldown_seconds", 300)
         folders = resolved_acc.setdefault("folders", {})
         folders.setdefault("inbox", "INBOX")
         folders.setdefault("sent", "Sent")

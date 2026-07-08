@@ -15,6 +15,10 @@ accounts:
     imap_port: 993
     smtp_host: smtp.gmail.com
     smtp_port: 587
+    # Suppress immediate retries after bad credentials to avoid provider IP blocks.
+    auth_failure_cooldown_seconds: 300
+    # Optional SMTP EHLO/HELO name. Defaults to the sender email domain.
+    # smtp_local_hostname: example.com
     allowed_users:
       - your-email@gmail.com
     allow_all: false
@@ -33,6 +37,8 @@ accounts:
     imap_port: 993
     smtp_host: smtp.company.com
     smtp_port: 587
+    auth_failure_cooldown_seconds: 300
+    # smtp_local_hostname: company.com
     allowed_users:
       - your-email@company.com
     allow_all: false

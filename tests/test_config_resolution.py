@@ -169,6 +169,7 @@ accounts:
         self.assertFalse(account["allow_all"])
         self.assertFalse(account["skip_attachments"])
         self.assertEqual(account["poll_interval"], 15)
+        self.assertEqual(account["auth_failure_cooldown_seconds"], 300)
         self.assertEqual(
             account["folders"],
             {

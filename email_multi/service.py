@@ -11,11 +11,12 @@ import re
 import shlex
 import smtplib
 import ssl
+import time
 import uuid
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formatdate
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .attachments import extract_attachments
 from .config import get_account
@@ -33,22 +34,115 @@ logger = logging.getLogger(__name__)
 MAX_MESSAGE_LENGTH = 50_000
 HEADER_FETCH_BATCH_SIZE = 100
 FULL_FETCH_BATCH_SIZE = 25
+DEFAULT_AUTH_FAILURE_COOLDOWN_SECONDS = 300
+_AUTH_FAILURES: Dict[Tuple[str, str, str, str], float] = {}
+
+
+class AuthRetrySuppressed(RuntimeError):
+    """Raised when a recent auth failure makes another login attempt unsafe."""
 
 
 def _get_imap(acc: dict) -> imaplib.IMAP4_SSL:
     """Create and login to IMAP connection."""
-    imap = imaplib.IMAP4_SSL(acc["imap_host"], acc["imap_port"], timeout=30)
-    imap.login(acc["email"], acc["password"])
+    _assert_auth_retry_allowed(acc, "imap")
+    imap = imaplib.IMAP4_SSL(
+        acc["imap_host"],
+        acc["imap_port"],
+        ssl_context=ssl.create_default_context(),
+        timeout=30,
+    )
+    try:
+        imap.login(acc["email"], acc["password"])
+    except imaplib.IMAP4.error:
+        _record_auth_failure(acc, "imap")
+        try:
+            imap.logout()
+        except Exception:
+            pass
+        raise
+
+    _clear_auth_failure(acc, "imap")
     _send_imap_id(imap)
     return imap
 
 
 def _get_smtp(acc: dict) -> smtplib.SMTP:
     """Create and login to SMTP connection."""
-    smtp = smtplib.SMTP(acc["smtp_host"], acc["smtp_port"], timeout=30)
-    smtp.starttls(context=ssl.create_default_context())
-    smtp.login(acc["email"], acc["password"])
+    _assert_auth_retry_allowed(acc, "smtp")
+    smtp = smtplib.SMTP(
+        acc["smtp_host"],
+        acc["smtp_port"],
+        local_hostname=_smtp_local_hostname(acc),
+        timeout=30,
+    )
+    try:
+        smtp.ehlo()
+        if not smtp.has_extn("starttls"):
+            raise smtplib.SMTPNotSupportedError("SMTP server does not advertise STARTTLS")
+        smtp.starttls(context=ssl.create_default_context())
+        smtp.ehlo()
+        smtp.login(acc["email"], acc["password"])
+    except smtplib.SMTPAuthenticationError:
+        _record_auth_failure(acc, "smtp")
+        smtp.close()
+        raise
+    except Exception:
+        smtp.close()
+        raise
+
+    _clear_auth_failure(acc, "smtp")
     return smtp
+
+
+def _auth_key(acc: dict, protocol: str) -> Tuple[str, str, str, str]:
+    return (
+        protocol,
+        str(acc.get("email", "")).lower(),
+        str(acc.get(f"{protocol}_host", "")).lower(),
+        str(acc.get(f"{protocol}_port", "")),
+    )
+
+
+def _auth_cooldown_seconds(acc: dict) -> int:
+    try:
+        return max(0, int(acc.get("auth_failure_cooldown_seconds", DEFAULT_AUTH_FAILURE_COOLDOWN_SECONDS)))
+    except (TypeError, ValueError):
+        return DEFAULT_AUTH_FAILURE_COOLDOWN_SECONDS
+
+
+def _assert_auth_retry_allowed(acc: dict, protocol: str) -> None:
+    retry_at = _AUTH_FAILURES.get(_auth_key(acc, protocol))
+    if not retry_at:
+        return
+
+    wait_seconds = int(retry_at - time.monotonic())
+    if wait_seconds > 0:
+        account_id = acc.get("account_id") or acc.get("email") or "unknown"
+        raise AuthRetrySuppressed(
+            f"Recent {protocol.upper()} authentication failure for account '{account_id}'. "
+            f"Suppressing retry for {wait_seconds}s to avoid provider IP blocking."
+        )
+
+    _AUTH_FAILURES.pop(_auth_key(acc, protocol), None)
+
+
+def _record_auth_failure(acc: dict, protocol: str) -> None:
+    cooldown = _auth_cooldown_seconds(acc)
+    if cooldown > 0:
+        _AUTH_FAILURES[_auth_key(acc, protocol)] = time.monotonic() + cooldown
+
+
+def _clear_auth_failure(acc: dict, protocol: str) -> None:
+    _AUTH_FAILURES.pop(_auth_key(acc, protocol), None)
+
+
+def _smtp_local_hostname(acc: dict) -> str:
+    configured = str(acc.get("smtp_local_hostname", "")).strip()
+    if configured:
+        return configured
+    if "@" in str(acc.get("email", "")):
+        return str(acc["email"]).rsplit("@", 1)[1]
+    return "localhost"
 
 
 def _send_imap_id(imap: imaplib.IMAP4) -> None:
@@ -665,24 +759,39 @@ def check_account(account_id: str) -> Dict[str, Any]:
         raise ValueError(f"Account not found: {account_id}")
 
     result = {"account_id": account_id, "imap": False, "smtp": False}
+    skip_smtp = False
 
     try:
         imap = _get_imap(acc)
-        imap.select(acc["folders"]["inbox"], readonly=True)
-        status, data = imap.uid("search", None, "ALL")
-        count = len(data[0].split()) if data and data[0] else 0
-        result["imap"] = True
-        result["message_count"] = count
-        imap.logout()
+    except (imaplib.IMAP4.error, AuthRetrySuppressed) as e:
+        result["imap_error"] = str(e)
+        skip_smtp = True
     except Exception as e:
         result["imap_error"] = str(e)
+    else:
+        try:
+            imap.select(acc["folders"]["inbox"], readonly=True)
+            status, data = imap.uid("search", None, "ALL")
+            count = len(data[0].split()) if data and data[0] else 0
+            result["imap"] = True
+            result["message_count"] = count
+        except Exception as e:
+            result["imap_error"] = str(e)
+        finally:
+            try:
+                imap.logout()
+            except Exception:
+                pass
 
-    try:
-        smtp = _get_smtp(acc)
-        result["smtp"] = True
-        smtp.quit()
-    except Exception as e:
-        result["smtp_error"] = str(e)
+    if skip_smtp:
+        result["smtp_error"] = "Skipped after IMAP authentication failure to avoid provider IP blocking."
+    else:
+        try:
+            smtp = _get_smtp(acc)
+            result["smtp"] = True
+            smtp.quit()
+        except Exception as e:
+            result["smtp_error"] = str(e)
 
     return result
 

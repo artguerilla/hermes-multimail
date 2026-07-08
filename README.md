@@ -125,6 +125,9 @@ accounts:
     imap_port: 993
     smtp_host: smtp.gmail.com
     smtp_port: 587
+    auth_failure_cooldown_seconds: 300
+    # smtp_local_hostname defaults to the sender email domain.
+    # smtp_local_hostname: example.com
     allowed_users:
       - user@gmail.com
     allow_all: false
