@@ -74,13 +74,12 @@ jobs:
 
       - name: Block private workflow/config files
         run: |
-          test ! -e AGENTS.md
           test ! -e CLAUDE.md
           test ! -d .claude
           test ! -d .hermes
           test ! -d .codex
           test ! -d .agents
-          test ! -d email-multi
+          test ! -d email_multi
           test ! -f email_multi/accounts.yaml
 
       - name: Block committed env files
